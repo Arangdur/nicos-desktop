@@ -1,0 +1,51 @@
+{
+  "name": "nicos-desktop",
+  "version": "0.1.0",
+  "description": "NicOS Desktop — consola de Nicolás (Director) y Marianela (Operativa), con Claude y OpenAI.",
+  "main": "electron/main.js",
+  "author": "Nicolás Buso",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.nicolasbuso.nicos-desktop",
+    "productName": "NicOS Desktop",
+    "files": [
+      "electron/**/*",
+      "renderer/**/*",
+      "build/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": "dmg",
+      "extraResources": [
+        {
+          "from": "sidecar/dist/nicos-sidecar",
+          "to": "sidecar/nicos-sidecar"
+        }
+      ]
+    },
+    "win": {
+      "target": "nsis",
+      "extraResources": [
+        {
+          "from": "sidecar/dist/nicos-sidecar.exe",
+          "to": "sidecar/nicos-sidecar.exe"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

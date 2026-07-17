@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>NicOS Desktop — Director</title>
+  <link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+  <div class="banner">
+    <span class="title">NicOS Desktop · Director</span>
+    <span class="badge" id="server-status">conectando...</span>
+  </div>
+
+  <div class="container">
+    <div style="display:flex; gap:10px; margin-bottom:18px;">
+      <button class="secondary" data-tab="resumen">Resumen</button>
+      <button class="secondary" data-tab="chat">Chat</button>
+      <button class="secondary" data-tab="ajustes">Ajustes</button>
+    </div>
+
+    <div id="tab-resumen" class="tab-panel"></div>
+    <div id="tab-chat" class="tab-panel" style="display:none;"></div>
+    <div id="tab-ajustes" class="tab-panel" style="display:none;"></div>
+  </div>
+
+  <script src="../shared/settings-panel.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
