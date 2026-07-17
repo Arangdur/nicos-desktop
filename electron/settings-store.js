@@ -1,25 +1,32 @@
-// Almacenamiento de configuración: los secretos (API keys, credenciales de Google)
-// se cifran con safeStorage del propio SO (Keychain en Mac, DPAPI en Windows) antes
-// de tocar el disco — nunca se guardan en texto plano, a diferencia de lo que se
-// encontró en el ecosistema original (monitor_bot.py, whatsapp-config.json).
+// Almacenamiento de configuración — separado por perfil de rol, a propósito.
+//
+// Perfil Director (Nicolás, Mac): TODOS los secretos de IA/Google viven acá,
+// cifrados con safeStorage (Keychain). Es el único perfil con esta capacidad.
+//
+// Perfil Operativa (Marianela, Windows): NUNCA guarda ninguna API key ni
+// credencial de Google — solo el token de dispositivo emitido por el pairing
+// (también cifrado con safeStorage/DPAPI) y la dirección LAN de la Mac. No hay
+// forma de que un secreto termine en esta máquina porque el código ni siquiera
+// tiene un campo para escribirlo (ver settings-panel-operativa.js).
 const { app, safeStorage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
 const SETTINGS_PATH = path.join(app.getPath('userData'), 'nicos-settings.json');
 
-const SECRET_KEYS = [
+const DIRECTOR_SECRET_KEYS = [
   'ANTHROPIC_API_KEY',
   'OPENAI_API_KEY',
   'GOOGLE_SERVICE_ACCOUNT_JSON',
 ];
+const DIRECTOR_PLAIN_KEYS = ['WHATSAPP_SHEET_ID', 'ANTHROPIC_MODEL', 'OPENAI_MODEL'];
 
-const PLAIN_KEYS = [
-  'role',              // 'director' | 'operativa'
-  'WHATSAPP_SHEET_ID',
-  'ANTHROPIC_MODEL',
-  'OPENAI_MODEL',
-];
+// El token de dispositivo ES un secreto (da acceso a la Mac) — se cifra igual
+// que las API keys, aunque conceptualmente sea "de otro tipo".
+const OPERATIVA_SECRET_KEYS = ['PAIRED_DEVICE_TOKEN'];
+const OPERATIVA_PLAIN_KEYS = ['MAC_LAN_HOST', 'MAC_LAN_PORT', 'PAIRED_DEVICE_ID', 'PAIRED_DEVICE_NAME'];
+
+const COMMON_PLAIN_KEYS = ['role'];
 
 function _readRaw() {
   if (!fs.existsSync(SETTINGS_PATH)) return {};
@@ -36,15 +43,29 @@ function _writeRaw(obj) {
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(obj, null, 2), 'utf-8');
 }
 
-// Devuelve la config completa DESCIFRADA — solo se usa internamente en main process
-// para armar las env vars del sidecar. Nunca se manda tal cual al renderer.
+function _keysForRole(role) {
+  if (role === 'director') return { secret: DIRECTOR_SECRET_KEYS, plain: DIRECTOR_PLAIN_KEYS };
+  return { secret: OPERATIVA_SECRET_KEYS, plain: OPERATIVA_PLAIN_KEYS };
+}
+
+function getRole() {
+  return _readRaw().role || null;
+}
+
+// Config completa DESCIFRADA — solo para uso interno de main process (armar env
+// vars del sidecar si es Director, o headers de fetch si es Operativa).
 function getDecryptedConfig() {
   const raw = _readRaw();
-  const result = {};
-  for (const key of PLAIN_KEYS) {
+  // OJO: el default 'director' es solo para saber qué lista de claves leer del
+  // disco cuando todavía no hay rol guardado (no importa cuál, raw estará vacío
+  // igual) — el `role` que se DEVUELVE tiene que ser el real (o null), nunca el
+  // default, porque main.js decide si mostrar el selector según `if (!role)`.
+  const { secret, plain } = _keysForRole(raw.role || 'director');
+  const result = { role: raw.role || null };
+  for (const key of [...COMMON_PLAIN_KEYS, ...plain]) {
     if (raw[key] !== undefined) result[key] = raw[key];
   }
-  for (const key of SECRET_KEYS) {
+  for (const key of secret) {
     if (raw[key] && safeStorage.isEncryptionAvailable()) {
       try {
         result[key] = safeStorage.decryptString(Buffer.from(raw[key], 'base64'));
@@ -56,15 +77,18 @@ function getDecryptedConfig() {
   return result;
 }
 
-// Devuelve la config para mostrar en el renderer: los secretos vienen enmascarados
-// (solo un booleano "configurado: true/false"), nunca el valor real.
+// Config para el renderer: los secretos vienen enmascarados (solo "configurado: sí/no").
+// CRÍTICO: esta función nunca devuelve un secreto en texto plano, ni siquiera al
+// propio renderer de esa misma instalación — el renderer no tiene por qué verlo.
 function getMaskedConfig() {
   const raw = _readRaw();
-  const result = {};
-  for (const key of PLAIN_KEYS) {
+  const role = raw.role || null;
+  const { secret, plain } = role ? _keysForRole(role) : { secret: [], plain: [] };
+  const result = { role };
+  for (const key of plain) {
     result[key] = raw[key] !== undefined ? raw[key] : null;
   }
-  for (const key of SECRET_KEYS) {
+  for (const key of secret) {
     result[key + '_configurado'] = Boolean(raw[key]);
   }
   return result;
@@ -72,10 +96,15 @@ function getMaskedConfig() {
 
 function saveSettings(update) {
   const raw = _readRaw();
-  for (const key of PLAIN_KEYS) {
+  const role = update.role || raw.role || 'director';
+  const { secret, plain } = _keysForRole(role);
+
+  if (update.role !== undefined) raw.role = update.role;
+
+  for (const key of plain) {
     if (update[key] !== undefined) raw[key] = update[key];
   }
-  for (const key of SECRET_KEYS) {
+  for (const key of secret) {
     if (update[key] !== undefined && update[key] !== '') {
       if (!safeStorage.isEncryptionAvailable()) {
         throw new Error(
@@ -89,4 +118,15 @@ function saveSettings(update) {
   _writeRaw(raw);
 }
 
-module.exports = { getDecryptedConfig, getMaskedConfig, saveSettings, SECRET_KEYS, PLAIN_KEYS };
+function clearOperativaPairing() {
+  const raw = _readRaw();
+  for (const key of [...OPERATIVA_SECRET_KEYS, ...OPERATIVA_PLAIN_KEYS]) {
+    delete raw[key];
+  }
+  _writeRaw(raw);
+}
+
+module.exports = {
+  getRole, getDecryptedConfig, getMaskedConfig, saveSettings, clearOperativaPairing,
+  DIRECTOR_SECRET_KEYS, DIRECTOR_PLAIN_KEYS, OPERATIVA_SECRET_KEYS, OPERATIVA_PLAIN_KEYS,
+};

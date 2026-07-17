@@ -28,7 +28,11 @@ function switchTab(name) {
 }
 
 document.querySelectorAll('[data-tab]').forEach((btn) => {
-  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  btn.addEventListener('click', () => {
+    switchTab(btn.dataset.tab);
+    if (btn.dataset.tab === 'tareas') renderTasksList();
+    if (btn.dataset.tab === 'ajustes') loadAjustes();
+  });
 });
 
 async function loadResumen() {
@@ -156,7 +160,7 @@ function loadChat() {
 
 function loadAjustes() {
   const el = document.getElementById('tab-ajustes');
-  renderSettingsPanel(el);
+  renderSettingsPanelDirector(el, API);
 }
 
 async function init() {
@@ -176,10 +180,24 @@ async function init() {
     statusEl.textContent = 'sidecar no responde';
   }
 
+  initTasksTab(API);
   await loadResumen();
+  await loadTasksTab();
   loadChat();
   loadAjustes();
   switchTab('resumen');
+
+  setInterval(() => {
+    if (document.getElementById('tab-tareas').style.display !== 'none') {
+      renderTasksList();
+    } else {
+      // igual actualizar el contador del badge aunque no estemos parados en la pestaña
+      fetchJson('/api/v1/tasks?state=pending_approval').then((d) => {
+        const badge = document.getElementById('badge-pending-count');
+        if (badge && d.ok) badge.textContent = d.tasks.length > 0 ? `(${d.tasks.length})` : '';
+      });
+    }
+  }, 15000);
 }
 
 init();

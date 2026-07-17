@@ -1,9 +1,9 @@
-// Vista Operativa (Marianela) — tabla de mensajes de la hoja "Bot WhatsApp Consultorio",
-// equivalente funcional al dashboard de Google Apps Script que ya usa hoy (ver
-// jarvis-trabajo/manual_marianela.md para el esquema de columnas y los tipos de mensaje).
+// Vista Operativa (Marianela) — a diferencia de v0.1, esta app NO corre ningún
+// sidecar local ni tiene una URL de API propia: todo pasa por window.nicos.operativa*
+// (IPC hacia main.js, que le habla por HTTP+token a la Mac de Nicolás). Así es
+// literalmente imposible que un secreto termine en esta máquina — el código
+// de esta vista ni siquiera tiene un lugar donde guardarlo.
 
-const params = new URLSearchParams(window.location.search);
-let API = null;
 let allMessages = [];
 let currentFilter = 'todos';
 
@@ -17,17 +17,16 @@ function escHtml(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-async function fetchJson(path, opts) {
-  const res = await fetch(`${API}${path}`, opts);
-  return res.json();
-}
-
 function switchTab(name) {
   document.querySelectorAll('.tab-panel').forEach((el) => (el.style.display = 'none'));
   document.getElementById(`tab-${name}`).style.display = 'block';
 }
 document.querySelectorAll('[data-tab]').forEach((btn) => {
-  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  btn.addEventListener('click', () => {
+    switchTab(btn.dataset.tab);
+    if (btn.dataset.tab === 'entrada') loadMisTareas();
+    if (btn.dataset.tab === 'mensajes') loadMensajes();
+  });
 });
 
 function estadoTagClass(estado) {
@@ -97,11 +96,7 @@ function renderTable() {
         Urgente: tr.querySelector('.edit-urgente').value,
       };
       btn.textContent = 'Guardando...';
-      const result = await fetchJson('/whatsapp/messages/update', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ row, updates }),
-      });
+      const result = await window.nicos.operativaUpdateMessage(row, updates);
       btn.textContent = result.ok ? 'Guardado ✓' : 'Error';
       if (result.ok) await loadMensajes();
     });
@@ -132,7 +127,7 @@ async function loadMensajes() {
   }
 
   document.getElementById('mensajes-tabla').innerHTML = '<div class="empty">Cargando...</div>';
-  const data = await fetchJson('/whatsapp/messages');
+  const data = await window.nicos.operativaListMessages();
   if (!data.ok) {
     document.getElementById('mensajes-tabla').innerHTML = `<div class="error-box">${escHtml(data.error)}</div>`;
     return;
@@ -143,31 +138,22 @@ async function loadMensajes() {
 
 function loadAjustes() {
   const el = document.getElementById('tab-ajustes');
-  renderSettingsPanel(el);
+  renderSettingsPanelOperativa(el);
 }
 
 async function init() {
   const statusEl = document.getElementById('server-status');
-  let port = params.get('port');
-  if (!port) port = await window.nicos.getSidecarPort();
-  if (!port) {
-    statusEl.textContent = 'sidecar no disponible';
-    return;
-  }
-  API = `http://127.0.0.1:${port}`;
+  statusEl.textContent = 'vinculado';
 
-  try {
-    const ping = await fetchJson('/ping');
-    statusEl.textContent = ping.ok ? 'conectado' : 'error';
-  } catch (e) {
-    statusEl.textContent = 'sidecar no responde';
-  }
-
-  await loadMensajes();
+  await loadEntradaRapida();
   loadAjustes();
-  switchTab('mensajes');
+  switchTab('entrada');
+  updateOutboxBadge();
 
-  setInterval(loadMensajes, 60000);
+  setInterval(() => {
+    updateOutboxBadge();
+    if (document.getElementById('tab-entrada').style.display !== 'none') loadMisTareas();
+  }, 20000);
 }
 
 init();

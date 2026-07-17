@@ -7,21 +7,24 @@
 </head>
 <body>
   <div class="banner">
-    <span class="title">NicOS Desktop · Bot WhatsApp Consultorio</span>
+    <span class="title">NicOS Desktop · Consultorio</span>
     <span class="badge" id="server-status">conectando...</span>
   </div>
 
   <div class="container">
     <div style="display:flex; gap:10px; margin-bottom:18px;">
+      <button class="secondary" data-tab="entrada">Entrada rápida <span id="badge-outbox"></span></button>
       <button class="secondary" data-tab="mensajes">Mensajes</button>
       <button class="secondary" data-tab="ajustes">Ajustes</button>
     </div>
 
-    <div id="tab-mensajes" class="tab-panel"></div>
+    <div id="tab-entrada" class="tab-panel"></div>
+    <div id="tab-mensajes" class="tab-panel" style="display:none;"></div>
     <div id="tab-ajustes" class="tab-panel" style="display:none;"></div>
   </div>
 
-  <script src="../shared/settings-panel.js"></script>
+  <script src="../shared/settings-panel-operativa.js"></script>
+  <script src="entrada-rapida.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -3,8 +3,10 @@ const path = require('path');
 
 const settingsStore = require('./settings-store');
 const sidecar = require('./sidecar-manager');
+const operativaClient = require('./operativa-client');
 
 let mainWindow = null;
+let outboxFlushInterval = null;
 
 function _envFromConfig(config) {
   const env = {};
@@ -17,31 +19,46 @@ function _envFromConfig(config) {
   return env;
 }
 
-async function _bootSidecarAndLoad() {
+function _startOutboxFlusher() {
+  if (outboxFlushInterval) return;
+  outboxFlushInterval = setInterval(async () => {
+    const result = await operativaClient.flushOutbox();
+    if (result.flushed > 0) {
+      console.log(`[main] outbox: ${result.flushed} tarea(s) enviada(s) a la Mac`);
+    }
+  }, 30000);
+}
+
+async function _bootAndLoad() {
   const config = settingsStore.getDecryptedConfig();
-  let port;
-  try {
-    port = await sidecar.startSidecar(_envFromConfig(config));
-  } catch (err) {
-    console.error('[main] no se pudo arrancar el sidecar:', err);
-    port = null;
+  const role = config.role || null;
+  let port = null;
+
+  // CLAVE: solo el rol Director levanta el sidecar Python (con todos los secretos).
+  // El rol Operativa NUNCA corre ese proceso en su máquina — solo habla por HTTP
+  // a la Mac (ver operativa-client.js), así que no hay ningún secreto que pueda
+  // terminar en la PC de Marianela ni siquiera por error de configuración.
+  if (role === 'director') {
+    try {
+      port = await sidecar.startSidecar(_envFromConfig(config));
+    } catch (err) {
+      console.error('[main] no se pudo arrancar el sidecar:', err);
+    }
+  } else if (role === 'operativa') {
+    _startOutboxFlusher();
   }
 
-  const role = config.role || null;
   const query = new URLSearchParams({ port: port || '', role: role || '' }).toString();
 
   if (!role) {
-    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'shared', 'selector.html'), {
-      search: query,
-    });
+    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'shared', 'selector.html'), { search: query });
   } else if (role === 'director') {
-    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'director', 'index.html'), {
-      search: query,
-    });
+    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'director', 'index.html'), { search: query });
+  } else if (!config.PAIRED_DEVICE_TOKEN) {
+    // Operativa sin vincular todavía -> pantalla de pairing, no la app directamente.
+    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'operativa', 'pairing.html'), { search: query });
   } else {
-    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'operativa', 'index.html'), {
-      search: query,
-    });
+    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'operativa', 'index.html'), { search: query });
   }
 }
 
@@ -59,12 +76,11 @@ function createWindow() {
     },
   });
 
-  _bootSidecarAndLoad();
+  _bootAndLoad();
 }
 
 app.whenReady().then(() => {
   createWindow();
-
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -72,28 +88,54 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   sidecar.stopSidecar();
+  if (outboxFlushInterval) clearInterval(outboxFlushInterval);
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', () => {
   sidecar.stopSidecar();
+  if (outboxFlushInterval) clearInterval(outboxFlushInterval);
 });
 
-// ---- IPC: puente seguro entre el renderer (sin acceso a Node) y este proceso ----
+// ---- IPC comunes ----
 
 ipcMain.handle('nicos:get-masked-settings', () => settingsStore.getMaskedConfig());
 
 ipcMain.handle('nicos:save-settings', async (_event, update) => {
   settingsStore.saveSettings(update);
   const config = settingsStore.getDecryptedConfig();
-  const port = await sidecar.restartSidecar(_envFromConfig(config));
+  let port = null;
+  if (config.role === 'director') {
+    port = await sidecar.restartSidecar(_envFromConfig(config));
+  }
   return { ok: true, port };
 });
 
 ipcMain.handle('nicos:set-role', async (_event, role) => {
   settingsStore.saveSettings({ role });
-  if (mainWindow) await _bootSidecarAndLoad();
+  if (mainWindow) await _bootAndLoad();
   return { ok: true };
 });
 
 ipcMain.handle('nicos:get-sidecar-port', () => sidecar.getPort());
+
+// ---- IPC exclusivo de la vista Operativa (el token nunca sale de main process) ----
+
+ipcMain.handle('nicos:operativa-pair', async (_event, { host, port, code, deviceName }) => {
+  await operativaClient.pairWithMac(host, port, code, deviceName);
+  if (mainWindow) await _bootAndLoad();
+  return { ok: true };
+});
+
+ipcMain.handle('nicos:operativa-submit-task', (_event, rawText) => operativaClient.submitTask(rawText));
+ipcMain.handle('nicos:operativa-list-tasks', () => operativaClient.listTasks());
+ipcMain.handle('nicos:operativa-flush-outbox', () => operativaClient.flushOutbox());
+ipcMain.handle('nicos:operativa-outbox-count', () => operativaClient.getOutboxCount());
+ipcMain.handle('nicos:operativa-list-messages', () => operativaClient.listMessages());
+ipcMain.handle('nicos:operativa-update-message', (_event, { row, updates }) =>
+  operativaClient.updateMessage(row, updates));
+
+ipcMain.handle('nicos:operativa-forget-pairing', () => {
+  settingsStore.clearOperativaPairing();
+  return { ok: true };
+});

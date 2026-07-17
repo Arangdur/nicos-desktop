@@ -1,5 +1,7 @@
-// Puente seguro: el renderer NUNCA tiene acceso directo a Node/fs/child_process.
+// Puente seguro: el renderer NUNCA tiene acceso directo a Node/fs/child_process/fetch-con-token.
 // Solo puede llamar estas funciones puntuales, que a su vez pasan por ipcMain en main.js.
+// Notar que ninguna de las funciones de "operativa-*" devuelve ni recibe un secreto —
+// el token de dispositivo vive y se usa enteramente dentro de main.js/operativa-client.js.
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('nicos', {
@@ -7,4 +9,14 @@ contextBridge.exposeInMainWorld('nicos', {
   saveSettings: (update) => ipcRenderer.invoke('nicos:save-settings', update),
   setRole: (role) => ipcRenderer.invoke('nicos:set-role', role),
   getSidecarPort: () => ipcRenderer.invoke('nicos:get-sidecar-port'),
+
+  operativaPair: (host, port, code, deviceName) =>
+    ipcRenderer.invoke('nicos:operativa-pair', { host, port, code, deviceName }),
+  operativaSubmitTask: (rawText) => ipcRenderer.invoke('nicos:operativa-submit-task', rawText),
+  operativaListTasks: () => ipcRenderer.invoke('nicos:operativa-list-tasks'),
+  operativaFlushOutbox: () => ipcRenderer.invoke('nicos:operativa-flush-outbox'),
+  operativaOutboxCount: () => ipcRenderer.invoke('nicos:operativa-outbox-count'),
+  operativaForgetPairing: () => ipcRenderer.invoke('nicos:operativa-forget-pairing'),
+  operativaListMessages: () => ipcRenderer.invoke('nicos:operativa-list-messages'),
+  operativaUpdateMessage: (row, updates) => ipcRenderer.invoke('nicos:operativa-update-message', { row, updates }),
 });

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "_nota": "Qué proveedor de IA usa cada tipo de tarea. Editable sin tocar código — el sidecar relee este archivo en cada consulta. El proveedor NUNCA decide riesgo ni permisos, solo ejecuta extracción/redacción/revisión (ver centro_mando_adapter.py, que es 100% determinístico).",
+  "rules": {
+    "extract_task": "openai",
+    "director_chat": "claude",
+    "review": "claude"
+  },
+  "fallback_allowed_for_simple_tasks": true
+}
