@@ -8,7 +8,7 @@ Preparado para la sesión en persona con Nicolás (Director, Mac) y Marianela (O
 
 ## 0. Antes de empezar
 
-- [ ] Rama `feature/nicos-v0.2`, con `git log --oneline -1` verificado ANTES de arrancar. **Nota de versión**: el tag `v0.2.1-rc3` marca el commit del fix de reconciliación (código + tests) — esta guía y los scripts de exportación de logs viven en commits posteriores, sin tag propio (`v0.2.1-rc3 └── commits de documentación/tooling, sin tag`). No es un problema, pero conviene saberlo: cuando terminen las pruebas físicas y se corrijan los hallazgos que aparezcan, el tag final `v0.2.1` tiene que apuntar al último commit, el que ya incluye esta documentación y esas correcciones — no a `v0.2.1-rc3`.
+- [ ] Rama `feature/nicos-v0.2`, exactamente en el tag **`v0.2.1-rc4`** (`git describe --tags` debe decir `v0.2.1-rc4`, no un commit posterior sin identificar). `v0.2.1-rc3` sigue existiendo y no se mueve — marca el commit del fix de reconciliación en aislamiento; `v0.2.1-rc4` es el que además incluye esta guía, los exportadores sanitizados, y la corrección del empaquetado local en Windows. Ver `docs/REGISTRO_VERSION_Y_PAQUETES.md` para registrar el SHA y, más adelante, los hashes de los paquetes instalados.
 - [ ] `npm install` corrido en la Mac (`cd "NicOS Desktop" && npm install`).
 - [ ] Sidecar con su venv armado (`cd sidecar && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`).
 - [ ] Confirmar que el suite de tests pasa antes de arrancar: `python3 sidecar/tests/run_all.py` → debe decir `16/16 archivos de test pasaron`.
@@ -207,10 +207,16 @@ bash scripts/exportar_logs_mac.sh --include-database
 
 ```powershell
 # Windows -- esta PC no tiene nicos.db (el sidecar solo corre en la Mac), y el
-# script nunca copia el token del dispositivo ni el contenido del outbox
-# (solo indica si están configurados y cuántos ítems hay en cola):
+# script NUNCA copia el token del dispositivo ni el contenido del outbox
+# (solo indica si están configurados y cuántos ítems hay en cola), ni siquiera
+# con el flag de abajo -- eso es fijo, no opcional:
 powershell -ExecutionPolicy Bypass -File scripts\exportar_logs_windows.ps1
+
+# + log crudo de npm start, si hace falta (el script avisa antes):
+powershell -ExecutionPolicy Bypass -File scripts\exportar_logs_windows.ps1 -IncludeRawLog
 ```
+
+Ninguno de los dos reportes sanitizados (Mac/Windows) exporta por defecto: tokens o secretos, contenido del outbox, texto de tareas, montos o resultados, variables de entorno, excepciones sin redactar, ni rutas locales con el nombre de usuario del sistema (`lsof` del lado Mac recorta explícitamente la columna `USER` por este motivo).
 
 Instrucciones completas dentro de cada script (comentario al principio).
 

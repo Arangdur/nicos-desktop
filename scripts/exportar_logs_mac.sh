@@ -2,21 +2,20 @@
 # Junta en una carpeta con fecha lo necesario para diagnosticar un problema
 # durante la prueba física.
 #
-# Por defecto genera un REPORTE SANITIZADO, no una copia de nicos.db: la base
-# puede tener texto original de tareas, importes, resultados financieros,
-# mensajes de error con detalle operativo, o datos ingresados sin querer --
-# nada de eso sale por defecto. El reporte sanitizado tiene conteos por
-# estado, IDs, timestamps y metadata de esquema, sin el contenido de
-# raw_text/extracted_json/result_json/error_message/detail_json.
+# Por defecto genera un REPORTE SANITIZADO. Explícitamente NO exporta (por
+# defecto): tokens/secretos, texto de tareas, montos/resultados, variables de
+# entorno, excepciones sin redactar, ni rutas locales con el nombre de
+# usuario. Ver el detalle de qué se excluye en cada sección más abajo.
 #
-# La copia ÍNTEGRA de nicos.db (para depurar algo puntual que el reporte
-# sanitizado no alcanza a explicar) requiere el flag explícito
-# --include-database, y el script avisa antes de hacerlo.
+# La copia ÍNTEGRA de nicos.db + el log crudo de npm start (que SÍ pueden
+# tener texto de tareas, importes, resultados, o tracebacks con detalle
+# operativo) requieren el flag explícito --include-database, y el script
+# avisa antes de incluirlos.
 #
 # Uso:
 #   cd "NicOS Desktop"
 #   bash scripts/exportar_logs_mac.sh                    # solo reporte sanitizado
-#   bash scripts/exportar_logs_mac.sh --include-database  # + copia íntegra de nicos.db
+#   bash scripts/exportar_logs_mac.sh --include-database  # + nicos.db + log crudo
 #
 # No toca ningún archivo real de Centro de Mando ni de CFO y Decisiones
 # Estrategicas -- solo lee, nunca escribe fuera de la carpeta que genera.
@@ -45,9 +44,12 @@ echo "Exportando a: $OUT_DIR"
 } > "$OUT_DIR/tailscale.txt"
 
 # --- Puerto de red del sidecar ---
+# Se recorta la columna USER de lsof a propósito -- por defecto muestra el
+# nombre de usuario de macOS que corre el proceso, que no hace falta para
+# este diagnóstico (alcanza con COMMAND/PID/TYPE/NAME).
 {
-  echo "=== lsof -iTCP:47500 ==="
-  lsof -iTCP:47500 -sTCP:LISTEN 2>&1 || echo "(nada escuchando en 47500)"
+  echo "=== proceso escuchando en :47500 (sin columna USER) ==="
+  lsof -iTCP:47500 -sTCP:LISTEN -P 2>&1 | awk '{print $1, $2, $5, $9}' || echo "(nada escuchando en 47500)"
 } > "$OUT_DIR/puerto_red.txt"
 
 # --- Reporte SANITIZADO de nicos.db (por defecto) ---
@@ -81,18 +83,24 @@ if [ -f "$DB_PATH" ] && command -v sqlite3 >/dev/null 2>&1; then
     cp "$DB_PATH" "$OUT_DIR/nicos.db"
   fi
 else
-  echo "(no se encontró $DB_PATH o falta sqlite3)" > "$OUT_DIR/nicos_db_no_disponible.txt"
+  echo "(no se encontró la base de datos local o falta sqlite3)" > "$OUT_DIR/nicos_db_no_disponible.txt"
 fi
 
-# --- Log de npm start, si se guardó en el Desktop como sugiere la guía ---
-LATEST_LOG=$(ls -t "$HOME"/Desktop/nicos-mac-*.log 2>/dev/null | head -1 || true)
-if [ -n "${LATEST_LOG:-}" ]; then
-  cp "$LATEST_LOG" "$OUT_DIR/npm_start.log"
+# --- Log de npm start (solo con --include-database): puede tener tracebacks
+# de Python sin redactar, o cualquier cosa que se haya impreso en esa
+# terminal durante la sesión -- no se puede garantizar que esté limpio, así
+# que no se copia por defecto. ---
+if [ "$INCLUDE_DB" = true ]; then
+  LATEST_LOG=$(ls -t "$HOME"/Desktop/nicos-mac-*.log 2>/dev/null | head -1 || true)
+  if [ -n "${LATEST_LOG:-}" ]; then
+    echo "⚠️  Copiando el log crudo de npm start -- revisar antes de compartir."
+    cp "$LATEST_LOG" "$OUT_DIR/npm_start.log"
+  fi
 fi
 
 echo "Listo. Carpeta: $OUT_DIR"
 if [ "$INCLUDE_DB" = false ]; then
-  echo "(reporte sanitizado -- para la copia íntegra de nicos.db, correr con --include-database)"
+  echo "(reporte sanitizado -- para nicos.db + log crudo, correr con --include-database)"
 fi
 echo "Contenido:"
 ls -la "$OUT_DIR"
