@@ -52,14 +52,26 @@ class TestExecutionReconciliation(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
-    def _write_ledger_entry(self, operation_id, status, row_text=None):
+    def _write_ledger_entry(self, operation_id, status, row_text=None, target_file=None, expected_offset=None):
         entry = {"operation_id": operation_id, "status": status, "ts": "2026-07-18T00:00:00"}
         if row_text is not None:
             entry["row_text"] = row_text
+        if target_file is not None:
+            entry["target_file"] = target_file
+        if expected_offset is not None:
+            entry["expected_offset"] = expected_offset
         with open(self.tmp_ledger, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    def _write_row_to_foto(self, row_text):
+    def _expected_offset_for_insertion(self):
+        """Posición en bytes (v0.2.1-rc3) donde caería la próxima fila --
+        mismo cálculo que hace registrar_movimiento.py real."""
+        with open(self.tmp_foto, "r", encoding="utf-8") as f:
+            contenido = f.read()
+        idx = contenido.find("\n---")
+        return len(contenido[:idx].encode("utf-8"))
+
+    def _write_row_to_foto(self, row_text, offset):
         with open(self.tmp_foto, "r", encoding="utf-8") as f:
             contenido = f.read()
         idx = contenido.find("\n---")
@@ -69,25 +81,28 @@ class TestExecutionReconciliation(unittest.TestCase):
     # ---- reconcile_execution_attempt() en aislamiento ----
 
     def test_claimed_siempre_effect_failed_sin_mirar_el_ledger(self):
-        self._write_ledger_entry("op-fantasma", "committed", row_text="| x |")
+        self._write_ledger_entry("op-fantasma", "committed", row_text="| x |", target_file=self.tmp_foto, expected_offset=0)
         attempt = {"status": "claimed", "operation_id": "op-nunca-invocado"}
         self.assertEqual(self.cma.reconcile_execution_attempt(attempt), "effect_failed")
 
     def test_committed_con_evidencia_verificable_es_confirmado(self):
         row_text = "| 18/07/2026 | Test reconcile | $1.000 | Gasto variable |"
-        self._write_ledger_entry("op-abc-123", "reserved", row_text=row_text)
-        self._write_row_to_foto(row_text)
-        self._write_ledger_entry("op-abc-123", "committed", row_text=row_text)
+        offset = self._expected_offset_for_insertion()
+        self._write_ledger_entry("op-abc-123", "reserved", row_text=row_text, target_file=self.tmp_foto, expected_offset=offset)
+        self._write_row_to_foto(row_text, offset)
+        self._write_ledger_entry("op-abc-123", "committed", row_text=row_text, target_file=self.tmp_foto, expected_offset=offset)
         attempt = {"status": "effect_started", "operation_id": "op-abc-123"}
         self.assertEqual(self.cma.reconcile_execution_attempt(attempt), "effect_confirmed")
 
     def test_committed_SIN_evidencia_en_el_archivo_es_uncertain(self):
-        """El corazón del endurecimiento de rc2: la palabra 'committed' del
+        """El corazón del endurecimiento de rc2/rc3: la palabra 'committed' del
         ledger NUNCA se toma como suficiente por sí sola -- si el texto no
-        aparece en el archivo real (inconsistencia, archivo editado después,
-        etc.), la reconciliación desconfía y devuelve 'uncertain', no 'effect_confirmed'."""
+        aparece EN LA POSICIÓN esperada del archivo real (inconsistencia,
+        archivo editado después, etc.), la reconciliación desconfía y
+        devuelve 'uncertain', no 'effect_confirmed'."""
         row_text = "| 18/07/2026 | Este texto no está en el archivo | $1.000 | Gasto variable |"
-        self._write_ledger_entry("op-committed-sin-evidencia", "committed", row_text=row_text)
+        offset = self._expected_offset_for_insertion()
+        self._write_ledger_entry("op-committed-sin-evidencia", "committed", row_text=row_text, target_file=self.tmp_foto, expected_offset=offset)
         attempt = {"status": "effect_started", "operation_id": "op-committed-sin-evidencia"}
         self.assertEqual(self.cma.reconcile_execution_attempt(attempt), "uncertain")
 
@@ -97,20 +112,36 @@ class TestExecutionReconciliation(unittest.TestCase):
         # antes del marcador 'committed'. Sin evidencia en el archivo, la
         # respuesta correcta es 'uncertain', nunca 'effect_failed'.
         row_text = "| 18/07/2026 | Nunca se escribió | $1.000 | Gasto variable |"
-        self._write_ledger_entry("op-solo-reservado", "reserved", row_text=row_text)
+        offset = self._expected_offset_for_insertion()
+        self._write_ledger_entry("op-solo-reservado", "reserved", row_text=row_text, target_file=self.tmp_foto, expected_offset=offset)
         attempt = {"status": "effect_started", "operation_id": "op-solo-reservado"}
         self.assertEqual(self.cma.reconcile_execution_attempt(attempt), "uncertain")
 
     def test_reserved_con_evidencia_real_es_confirmado(self):
         # El caso que motivó el endurecimiento: 'reserved' nada más, PERO el
-        # archivo real sí tiene la fila (el proceso escribió y murió antes de
-        # marcar 'committed') -- se reconcilia a effect_confirmed igual, por
-        # evidencia independiente, no por la palabra del ledger.
+        # archivo real sí tiene la fila EN LA POSICIÓN exacta (el proceso
+        # escribió y murió antes de marcar 'committed') -- se reconcilia a
+        # effect_confirmed igual, por evidencia independiente, no por la
+        # palabra del ledger.
         row_text = "| 18/07/2026 | Se escribió pero no se marcó committed | $1.000 | Gasto variable |"
-        self._write_ledger_entry("op-reserved-pero-escrito", "reserved", row_text=row_text)
-        self._write_row_to_foto(row_text)
+        offset = self._expected_offset_for_insertion()
+        self._write_ledger_entry("op-reserved-pero-escrito", "reserved", row_text=row_text, target_file=self.tmp_foto, expected_offset=offset)
+        self._write_row_to_foto(row_text, offset)
         attempt = {"status": "effect_started", "operation_id": "op-reserved-pero-escrito"}
         self.assertEqual(self.cma.reconcile_execution_attempt(attempt), "effect_confirmed")
+
+    def test_falso_positivo_por_texto_en_otra_posicion_NO_ocurre(self):
+        """rc3: el texto aparece en el archivo, pero NO en la posición que el
+        ledger dijo que iba a usar -- no debe confirmarse (a diferencia de una
+        búsqueda por substring, que sí lo hubiera confirmado por error)."""
+        row_text = "| 18/07/2026 | Fila en una posición distinta | $1.000 | Gasto variable |"
+        offset_real = self._expected_offset_for_insertion()
+        self._write_row_to_foto(row_text, offset_real)
+        # El ledger, por lo que sea, apunta a un offset distinto (0) -- no
+        # coincide con dónde está realmente escrita la fila.
+        self._write_ledger_entry("op-offset-incorrecto", "committed", row_text=row_text, target_file=self.tmp_foto, expected_offset=0)
+        attempt = {"status": "effect_started", "operation_id": "op-offset-incorrecto"}
+        self.assertEqual(self.cma.reconcile_execution_attempt(attempt), "uncertain")
 
     def test_failed_explicito_en_el_ledger_es_effect_failed(self):
         # Certeza real: el script mismo detectó limpiamente que no podía
@@ -152,8 +183,9 @@ class TestExecutionReconciliation(unittest.TestCase):
     def test_efecto_SI_ocurrio_pero_nicos_murio_antes_de_registrar_resultado(self):
         task_id, attempt = self._make_task_stuck_executing("op-realmente-ejecutado")
         row_text = "| 17/07/2026 | algo | $10.000 | Gasto variable |"
-        self._write_ledger_entry("op-realmente-ejecutado", "committed", row_text=row_text)
-        self._write_row_to_foto(row_text)
+        offset = self._expected_offset_for_insertion()
+        self._write_ledger_entry("op-realmente-ejecutado", "committed", row_text=row_text, target_file=self.tmp_foto, expected_offset=offset)
+        self._write_row_to_foto(row_text, offset)
 
         self.worker.recover_orphaned_tasks()
 

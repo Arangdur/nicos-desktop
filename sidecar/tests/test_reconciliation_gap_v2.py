@@ -1,16 +1,20 @@
 """
-v0.2.1-rc2 — cierra el gap crítico señalado en la revisión: un ledger de UNA
-sola fase (donde la sola presencia de operation_id se leía como "ya escrito")
-no distingue "reservado, proceso murió antes de escribir" de "escrito de
-verdad, proceso murió antes de marcar committed". Ahora registrar_movimiento.py
-usa un ledger de DOS fases (reserved -> committed, o failed si se detecta
-limpiamente un error) con row_text -- el texto exacto de la fila -- guardado
-YA en la reserva, para que NicOS Core pueda verificar independientemente
-contra el archivo real sin depender de que el marcador 'committed' se haya
-alcanzado a escribir.
+v0.2.1-rc2/rc3 — cierra dos gaps críticos señalados en revisión:
 
-Los 3 escenarios exactos pedidos, simulados llamando a las mismas funciones
-que usaría el script real (_ledger_write, _build_fila_cfo) en el punto exacto
+rc2: un ledger de UNA sola fase (donde la sola presencia de operation_id se
+leía como "ya escrito") no distingue "reservado, proceso murió antes de
+escribir" de "escrito de verdad, proceso murió antes de marcar committed".
+Ahora registrar_movimiento.py usa un ledger de DOS fases (reserved ->
+committed, o failed si se detecta limpiamente un error).
+
+rc3: verificar row_text como SUBSTRING en cualquier parte del archivo puede
+dar un falso positivo si ya existía una fila idéntica de una carga anterior
+(mismo concepto/monto/fecha/tipo). Ahora la reserva guarda target_file +
+expected_offset (posición en bytes), y la reconciliación exige coincidencia
+EXACTA en esa posición -- ver test_falso_positivo_por_fila_preexistente_NO_ocurre.
+
+Los escenarios exactos pedidos, simulados llamando a las mismas funciones que
+usaría el script real (_ledger_write, _build_fila_cfo) en el punto exacto
 donde "se mata" el proceso -- sin duplicar lógica de formato (se importa
 _build_fila_cfo del script real).
 
@@ -18,7 +22,6 @@ Usa archivos y base temporales -- nunca toca nada real.
 
 Uso: python3 sidecar/tests/test_reconciliation_gap_v2.py
 """
-import glob
 import importlib.util
 import os
 import sys
@@ -77,6 +80,17 @@ class TestReconciliationGapV2(unittest.TestCase):
         with open(self.tmp_foto, "r", encoding="utf-8") as f:
             return f.read()
 
+    def _expected_offset_for_insertion(self):
+        """Replica el cálculo exacto que hace cmd_cfo real: la posición en
+        BYTES justo antes del '\\n---' de cierre de la sección de movimientos
+        -- ahí es donde va cualquier fila nueva."""
+        contenido = self._foto_content()
+        idx = contenido.find("## 6. MOVIMIENTOS DEL MES")
+        fin_tabla = contenido.find("\n---", idx)
+        if fin_tabla == -1:
+            fin_tabla = len(contenido)
+        return len(contenido[:fin_tabla].encode("utf-8"))
+
     def _make_task_stuck_executing(self, operation_id):
         result = self.tasks.create_task(f"gapv2-{operation_id}", "nicolas", None, "Gasté $7.500 en algo")
         task_id = result["task"]["task_id"]
@@ -100,8 +114,10 @@ class TestReconciliationGapV2(unittest.TestCase):
         task_id, attempt, args = self._make_task_stuck_executing(operation_id)
 
         fila = self.rm._build_fila_cfo(args["fecha"], args["concepto"], args["monto"], args["tipo"], args["detalle"])
+        expected_offset = self._expected_offset_for_insertion()
         # Solo reserva -- el "proceso" muere ANTES de tocar el archivo real.
-        self.rm._ledger_write(operation_id, "reserved", row_text=fila.rstrip("\n"))
+        self.rm._ledger_write(operation_id, "reserved", row_text=fila.rstrip("\n"),
+                               extra={"target_file": self.tmp_foto, "expected_offset": expected_offset})
 
         # Ground truth del escenario, confirmado antes de reconciliar:
         self.assertNotIn(args["concepto"], self._foto_content(), "el movimiento debe estar AUSENTE del archivo real")
@@ -126,10 +142,12 @@ class TestReconciliationGapV2(unittest.TestCase):
 
         fila = self.rm._build_fila_cfo(args["fecha"], args["concepto"], args["monto"], args["tipo"], args["detalle"])
         fila_sin_salto = fila.rstrip("\n")
+        expected_offset = self._expected_offset_for_insertion()
 
         # Mismo orden que cmd_cfo real: reservar, escribir el archivo... y ahí
         # el "proceso" muere -- NUNCA se llega a llamar _ledger_write(committed).
-        self.rm._ledger_write(operation_id, "reserved", row_text=fila_sin_salto)
+        self.rm._ledger_write(operation_id, "reserved", row_text=fila_sin_salto,
+                               extra={"target_file": self.tmp_foto, "expected_offset": expected_offset})
         contenido = self._foto_content()
         idx = contenido.find("\n---")
         nuevo_contenido = contenido[:idx] + fila + contenido[idx:]
@@ -161,7 +179,9 @@ class TestReconciliationGapV2(unittest.TestCase):
         operation_id = "op-gapv2-escenario-2b"
         task_id, attempt, args = self._make_task_stuck_executing(operation_id)
         fila = self.rm._build_fila_cfo(args["fecha"], args["concepto"], args["monto"], args["tipo"], args["detalle"])
-        self.rm._ledger_write(operation_id, "reserved", row_text=fila.rstrip("\n"))
+        expected_offset = self._expected_offset_for_insertion()
+        self.rm._ledger_write(operation_id, "reserved", row_text=fila.rstrip("\n"),
+                               extra={"target_file": self.tmp_foto, "expected_offset": expected_offset})
         # El archivo real NUNCA se toca -- el texto reservado no aparece ahí.
 
         self.worker.recover_orphaned_tasks()
@@ -177,18 +197,21 @@ class TestReconciliationGapV2(unittest.TestCase):
 
         fila = self.rm._build_fila_cfo(args["fecha"], args["concepto"], args["monto"], args["tipo"], args["detalle"])
         fila_sin_salto = fila.rstrip("\n")
+        expected_offset = self._expected_offset_for_insertion()
 
         # Flujo completo del lado de registrar_movimiento.py: reservar,
         # escribir, committed. El "proceso" (NicOS Core, no el script) muere
         # DESPUÉS de esto -- nunca llama tasks.finish_execution_attempt() ni
         # tasks.transition(..., "completed", ...).
-        self.rm._ledger_write(operation_id, "reserved", row_text=fila_sin_salto)
+        self.rm._ledger_write(operation_id, "reserved", row_text=fila_sin_salto,
+                               extra={"target_file": self.tmp_foto, "expected_offset": expected_offset})
         contenido = self._foto_content()
         idx = contenido.find("\n---")
         nuevo_contenido = contenido[:idx] + fila + contenido[idx:]
         with open(self.tmp_foto, "w", encoding="utf-8") as f:
             f.write(nuevo_contenido)
-        self.rm._ledger_write(operation_id, "committed", row_text=fila_sin_salto)
+        self.rm._ledger_write(operation_id, "committed", row_text=fila_sin_salto,
+                               extra={"target_file": self.tmp_foto, "expected_offset": expected_offset})
 
         self.assertEqual(self.rm._ledger_status(operation_id), "committed")
 
@@ -209,6 +232,64 @@ class TestReconciliationGapV2(unittest.TestCase):
         # (no se duplicó).
         ocurrencias = self._foto_content().count(args["concepto"])
         self.assertEqual(ocurrencias, 1, "el movimiento no debería estar duplicado")
+
+    # ---- rc3: el gap de precisión que señaló ChatGPT sobre rc2 ----
+
+    def test_falso_positivo_por_fila_preexistente_NO_ocurre(self):
+        """El hallazgo de ChatGPT sobre rc2: buscar row_text como substring en
+        cualquier parte del archivo puede dar un falso positivo si YA existía
+        una fila idéntica (mismo concepto/monto/fecha/tipo) de una carga
+        anterior, no relacionada. Este test arma exactamente ese escenario:
+        el archivo YA tiene la fila antes de que esta operación intente
+        escribir, el proceso muere ANTES de escribir (nunca debería
+        reconciliarse a completed), pero con el ledger de rc2 puro (row_text
+        como substring) SÍ se hubiera confirmado por error -- con offset
+        exacto (rc3), no."""
+        operation_id = "op-gapv2-falso-positivo"
+        task_id, attempt, args = self._make_task_stuck_executing(operation_id)
+        fila = self.rm._build_fila_cfo(args["fecha"], args["concepto"], args["monto"], args["tipo"], args["detalle"])
+        fila_sin_salto = fila.rstrip("\n")
+
+        # Una carga ANTERIOR, no relacionada, ya escribió una fila IDÉNTICA
+        # (mismo concepto/monto/fecha/tipo -- coincidencia real, no un bug).
+        contenido = self._foto_content()
+        idx = contenido.find("\n---")
+        contenido_con_fila_previa = contenido[:idx] + fila + contenido[idx:]
+        with open(self.tmp_foto, "w", encoding="utf-8") as f:
+            f.write(contenido_con_fila_previa)
+
+        # Ahora SÍ calculamos expected_offset -- después de que la fila previa
+        # ya está en el archivo, así que apunta a la posición siguiente
+        # (donde ESTA operación insertaría la suya, si llegara a escribir).
+        expected_offset_de_esta_operacion = self._expected_offset_for_insertion()
+
+        # Reserva de ESTA operación... y el "proceso" muere ANTES de escribir
+        # nada -- el archivo se queda exactamente como estaba (con la fila
+        # previa, pero SIN una segunda copia de esta operación).
+        self.rm._ledger_write(operation_id, "reserved", row_text=fila_sin_salto,
+                               extra={"target_file": self.tmp_foto, "expected_offset": expected_offset_de_esta_operacion})
+
+        # Ground truth: el texto SÍ aparece en el archivo (por la fila previa,
+        # no relacionada) -- una verificación por substring lo encontraría y
+        # confirmaría por error. En la posición esperada de ESTA operación,
+        # en cambio, no hay nada escrito todavía.
+        self.assertIn(fila_sin_salto, self._foto_content(), "la fila previa, no relacionada, sí está en el archivo")
+
+        self.worker.recover_orphaned_tasks()
+
+        task = self.tasks.get_task_dict(task_id)
+        self.assertNotEqual(task["state"], "completed",
+                             "NO debe reconciliarse a completed solo porque el texto aparece en otro lado del archivo")
+        self.assertEqual(task["state"], "needs_review")
+
+        row = self.db.get_connection().execute(
+            "SELECT status FROM execution_attempts WHERE execution_id = ?", (attempt["execution_id"],)
+        ).fetchone()
+        self.assertEqual(row["status"], "uncertain")
+
+        # Y el archivo real efectivamente NO tiene una segunda copia de la fila.
+        ocurrencias = self._foto_content().count(fila_sin_salto)
+        self.assertEqual(ocurrencias, 1, "no debería haberse escrito una segunda copia")
 
 
 if __name__ == "__main__":

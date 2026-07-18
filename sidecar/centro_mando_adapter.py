@@ -14,7 +14,6 @@ Capas (extracción -> política -> ejecución), sin que la IA decida riesgo:
   validate_result()    -- interpreta el resultado del subprocess
   record_result()      -- transiciona la tarea a completed/failed/needs_review
 """
-import glob
 import hashlib
 import json
 import os
@@ -268,26 +267,24 @@ def _read_operation_ledger():
         return None
 
 
-def _verify_row_in_destination(row_text: str) -> bool:
-    """Evidencia verificable independiente del ledger (no solo confiar en que
-    el ledger dice 'committed'): busca el texto EXACTO de la fila -- calculado
-    por registrar_movimiento.py ANTES de escribir, guardado en la entrada
-    'reserved' -- dentro de los foto_financiera_*.md reales. Si aparece, el
-    efecto externo ocurrió de verdad, sin importar si el ledger llegó a
-    registrar 'committed' o se quedó en 'reserved' por una interrupción justo
-    después de escribir."""
-    if not row_text:
+def _verify_row_at_offset(target_file, expected_offset, row_text) -> bool:
+    """Evidencia verificable independiente del ledger (v0.2.1-rc3, endurecido
+    tras el hallazgo de que buscar row_text como SUBSTRING en cualquier parte
+    del archivo puede dar un falso positivo si ya existía una fila idéntica
+    de una carga anterior -- mismo concepto/monto/fecha/tipo). Ahora se exige
+    coincidencia EXACTA en la posición (byte offset) donde
+    registrar_movimiento.py dijo, antes de escribir, que iba a insertar la
+    fila -- no alcanza con que el texto aparezca en algún lugar del archivo."""
+    if not target_file or expected_offset is None or not row_text:
         return False
-    cfo_dir = os.getenv("NICOS_CFO_DIR", "/Users/nicolasbuso/Claude/Projects/CFO y Decisiones Estrategicas")
-    pattern = os.path.join(cfo_dir, "foto_financiera_*.md")
-    for path in glob.glob(pattern):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                if row_text in f.read():
-                    return True
-        except OSError:
-            continue
-    return False
+    expected_bytes = (row_text + "\n").encode("utf-8")
+    try:
+        with open(target_file, "rb") as f:
+            f.seek(expected_offset)
+            segmento = f.read(len(expected_bytes))
+    except OSError:
+        return False
+    return segmento == expected_bytes
 
 
 def reconcile_execution_attempt(attempt: dict) -> str:
@@ -306,12 +303,14 @@ def reconcile_execution_attempt(attempt: dict) -> str:
       que no podía escribir, ej. no existe el archivo de destino): 'effect_failed'
       con certeza -- el script mismo confirma que nunca llegó a escribir.
     - 'reserved' o 'committed' en el ledger externo: NUNCA se confía ciegamente
-      en la palabra 'committed' -- siempre se verifica el row_text contra el
-      archivo real. Si aparece: 'effect_confirmed' (evidencia verificable, no
-      solo la palabra del ledger). Si no aparece: 'uncertain' -- incluso si el
-      ledger dice 'reserved' y el movimiento genuinamente nunca se escribió,
-      la respuesta correcta es 'uncertain' (requiere ojos humanos), no
-      'effect_failed' (que sonaría a certeza que acá no existe)."""
+      en la palabra 'committed', ni en que el texto aparezca en cualquier parte
+      del archivo (eso daría falso positivo si ya existía una fila idéntica de
+      una carga anterior) -- se exige coincidencia EXACTA en target_file +
+      expected_offset (ver _verify_row_at_offset). Si coincide: 'effect_confirmed'.
+      Si no: 'uncertain' -- incluso si el ledger dice 'reserved' y el movimiento
+      genuinamente nunca se escribió, la respuesta correcta es 'uncertain'
+      (requiere ojos humanos), no 'effect_failed' (que sonaría a certeza que
+      acá no existe)."""
     if attempt["status"] == "claimed":
         return "effect_failed"
 
@@ -326,12 +325,16 @@ def reconcile_execution_attempt(attempt: dict) -> str:
         return "effect_failed"
 
     if "committed" in statuses or "reserved" in statuses:
-        row_text = None
+        # La entrada más reciente con target_file/expected_offset -- 'committed'
+        # los repite, así que alcanza con la última entrada que los tenga.
+        target_file = expected_offset = row_text = None
         for e in reversed(entries):
-            if e.get("row_text"):
-                row_text = e["row_text"]
+            if e.get("target_file") and e.get("expected_offset") is not None:
+                target_file = e["target_file"]
+                expected_offset = e["expected_offset"]
+                row_text = e.get("row_text")
                 break
-        if row_text and _verify_row_in_destination(row_text):
+        if _verify_row_at_offset(target_file, expected_offset, row_text):
             return "effect_confirmed"
         return "uncertain"
 
