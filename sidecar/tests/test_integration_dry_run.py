@@ -193,10 +193,17 @@ class TestIntegrationDryRun(unittest.TestCase):
             registro = f.read()
         self.assertEqual(registro.count("agregado a"), 10)
 
+        # v0.2.1-rc2: el ledger es de dos fases (reserved + committed por cada
+        # operación exitosa, ver registrar_movimiento.py) -- 10 movimientos
+        # dejan 20 líneas, pero 10 operation_id ÚNICOS con estado 'committed'.
+        import json as _json
         with open(self.tmp_ledger, "r", encoding="utf-8") as f:
-            operation_ids = [line.strip() for line in f if line.strip()]
-        self.assertEqual(len(operation_ids), 10)
-        self.assertEqual(len(set(operation_ids)), 10, "operation_ids no deberían repetirse")
+            entradas = [_json.loads(line) for line in f if line.strip()]
+        self.assertEqual(len(entradas), 20, "cada operación exitosa deja 2 entradas: reserved + committed")
+        operation_ids = {e["operation_id"] for e in entradas}
+        self.assertEqual(len(operation_ids), 10, "operation_ids no deberían repetirse")
+        committed_ids = {e["operation_id"] for e in entradas if e["status"] == "committed"}
+        self.assertEqual(len(committed_ids), 10, "las 10 operaciones deberían haber llegado a 'committed'")
 
     def test_no_toca_archivos_reales(self):
         post_snapshot = _hash_dir_snapshot()

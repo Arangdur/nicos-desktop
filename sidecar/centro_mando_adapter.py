@@ -14,7 +14,9 @@ Capas (extracción -> política -> ejecución), sin que la IA decida riesgo:
   validate_result()    -- interpreta el resultado del subprocess
   record_result()      -- transiciona la tarea a completed/failed/needs_review
 """
+import glob
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -228,43 +230,115 @@ def execute_action(task_id: str, prepared_action: dict) -> dict:
     return result
 
 
-def _read_operation_ledger():
-    """Lee el ledger durable de operation_id ya procesados por
-    registrar_movimiento.py (mismo archivo que el script usa para deduplicar,
-    ver _operation_already_processed ahí). Devuelve un set() de operation_id,
-    o None si el archivo existe pero no se pudo leer (I/O real -- 'no existe
-    todavía' es un set vacío legítimo, no una falla)."""
-    ledger_path = os.getenv(
+def _operation_ledger_path():
+    return os.getenv(
         "NICOS_OPERATION_LEDGER", os.path.join(CENTRO_DE_MANDO_DIR, "OPERATION_IDS_PROCESADOS.txt")
     )
+
+
+def _read_operation_ledger():
+    """Lee el ledger durable de registrar_movimiento.py (JSONL, ver
+    _ledger_write ahí) y devuelve {operation_id: [entradas]}, o None si el
+    archivo existe pero no se pudo leer (I/O real -- 'no existe todavía' es
+    un dict vacío legítimo, no una falla).
+
+    v0.2.1-rc2: el ledger es de DOS FASES (reserved/committed/failed), no de
+    una sola -- la sola presencia de un operation_id (aunque solo tenga
+    'reserved') NO demuestra que el movimiento se haya escrito, porque el
+    proceso pudo morir entre reservar y escribir. Ver reconcile_execution_attempt."""
+    ledger_path = _operation_ledger_path()
     try:
         if not os.path.exists(ledger_path):
-            return set()
+            return {}
+        entries_by_op = {}
         with open(ledger_path, "r", encoding="utf-8") as f:
-            return {line.strip() for line in f if line.strip()}
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                op_id = entry.get("operation_id")
+                if op_id:
+                    entries_by_op.setdefault(op_id, []).append(entry)
+        return entries_by_op
     except OSError:
         return None
 
 
+def _verify_row_in_destination(row_text: str) -> bool:
+    """Evidencia verificable independiente del ledger (no solo confiar en que
+    el ledger dice 'committed'): busca el texto EXACTO de la fila -- calculado
+    por registrar_movimiento.py ANTES de escribir, guardado en la entrada
+    'reserved' -- dentro de los foto_financiera_*.md reales. Si aparece, el
+    efecto externo ocurrió de verdad, sin importar si el ledger llegó a
+    registrar 'committed' o se quedó en 'reserved' por una interrupción justo
+    después de escribir."""
+    if not row_text:
+        return False
+    cfo_dir = os.getenv("NICOS_CFO_DIR", "/Users/nicolasbuso/Claude/Projects/CFO y Decisiones Estrategicas")
+    pattern = os.path.join(cfo_dir, "foto_financiera_*.md")
+    for path in glob.glob(pattern):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                if row_text in f.read():
+                    return True
+        except OSError:
+            continue
+    return False
+
+
 def reconcile_execution_attempt(attempt: dict) -> str:
     """Determina el desenlace REAL de un intento que quedó a mitad tras un
-    reinicio, consultando el ledger durable en vez de adivinar (punto 1 de la
-    revisión post-v0.2.1: 'el operation_id debe quedar asociado a un recibo
-    verificable, no solo al ledger SQLite'). Devuelve 'effect_confirmed',
-    'effect_failed' o 'uncertain'. Nunca reintenta nada -- solo diagnostica."""
+    reinicio, consultando el ledger durable de DOS FASES en vez de adivinar
+    (punto 1 de la revisión post-v0.2.1, endurecido en rc2 tras el hallazgo de
+    que la sola presencia de un operation_id en un ledger de una fase no
+    demuestra el efecto). Devuelve 'effect_confirmed', 'effect_failed' o
+    'uncertain'. Nunca reintenta nada -- solo diagnostica.
+
+    Reglas (deliberadamente conservadoras -- ante la duda, 'uncertain', nunca
+    'effect_confirmed' sin evidencia verificable):
+    - 'claimed' en NicOS Core (subprocess nunca se invocó): 'effect_failed' con
+      certeza total -- ni siquiera pudo haber tocado el ledger externo.
+    - 'failed' en el ledger externo (registrar_movimiento.py detectó limpiamente
+      que no podía escribir, ej. no existe el archivo de destino): 'effect_failed'
+      con certeza -- el script mismo confirma que nunca llegó a escribir.
+    - 'reserved' o 'committed' en el ledger externo: NUNCA se confía ciegamente
+      en la palabra 'committed' -- siempre se verifica el row_text contra el
+      archivo real. Si aparece: 'effect_confirmed' (evidencia verificable, no
+      solo la palabra del ledger). Si no aparece: 'uncertain' -- incluso si el
+      ledger dice 'reserved' y el movimiento genuinamente nunca se escribió,
+      la respuesta correcta es 'uncertain' (requiere ojos humanos), no
+      'effect_failed' (que sonaría a certeza que acá no existe)."""
     if attempt["status"] == "claimed":
-        # El subprocess nunca se invocó -- ni siquiera pudo haber reclamado el
-        # operation_id en el ledger de registrar_movimiento.py. Certeza total.
         return "effect_failed"
+
     ledger = _read_operation_ledger()
     if ledger is None:
         return "uncertain"
-    if attempt["operation_id"] in ledger:
-        return "effect_confirmed"
-    # Ausencia en el ledger = certeza de que nunca se escribió: el orden
-    # "reclamar antes de escribir" en registrar_movimiento.py garantiza que un
-    # operation_id que no está en el ledger nunca llegó a tocar foto_financiera_*.md.
-    return "effect_failed"
+
+    entries = ledger.get(attempt["operation_id"], [])
+    statuses = {e.get("status") for e in entries}
+
+    if "failed" in statuses:
+        return "effect_failed"
+
+    if "committed" in statuses or "reserved" in statuses:
+        row_text = None
+        for e in reversed(entries):
+            if e.get("row_text"):
+                row_text = e["row_text"]
+                break
+        if row_text and _verify_row_in_destination(row_text):
+            return "effect_confirmed"
+        return "uncertain"
+
+    # Ninguna entrada para este operation_id pese a que NicOS Core sí invocó
+    # el subprocess (status != 'claimed') -- inesperado (debería haber al
+    # menos 'reserved'), tratado de forma conservadora.
+    return "uncertain"
 
 
 def validate_result(execution_result: dict) -> bool:
