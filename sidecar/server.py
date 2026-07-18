@@ -64,7 +64,7 @@ def _tailscale_running() -> bool:
         return False
 
 JARVIS_TRABAJO_PATH = os.getenv(
-    "JARVIS_TRABAJO_PATH",
+    "NICOS_JARVIS_TRABAJO",
     "/Users/nicolasbuso/trading_bot/jarvis-trabajo",
 )
 

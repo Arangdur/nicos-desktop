@@ -60,15 +60,47 @@ Re-verificado (`scripts/exportar_logs_mac.sh`, ya endurecido en el ciclo anterio
 ### Visualización de ambas vistas
 Confirmado visualmente: Resumen (datos reales de trading bot / consultorio), Tareas (Bandeja con la tarea recuperada), Ajustes del Director (tarjeta "Red — Tailscale", claves de IA, Google Sheets, dispositivos vinculados -- vacío tras el aislamiento correcto). Pantalla de pairing de Operativa. Ajustes de Operativa con secretos (sin secretos visibles) queda pendiente de la fase con Tailscale, porque esa pantalla solo se alcanza después de un pairing exitoso.
 
-## Pendiente (bloqueado por Tailscale y por las API keys de Nicolás)
+## Fase 2: prueba sobre Tailscale real (18/7/2026, misma Mac, IP `100.114.131.64`)
 
-No hecho en esta prueba, requiere que Nicolás actúe primero:
+Con Tailscale activo y autenticado (ver incidente de arranque del daemon más abajo), se repitió la prueba con las dos instancias de prueba conectándose por la IP real de Tailscale en vez de localhost -- exactamente los 8 pasos que pidió Nicolás.
 
-- Pairing real Mac↔Mac (Operativa simulada) por Tailscale.
-- Flujo completo de tareas por red: crear desde Operativa, aprobar/rechazar/pedir información desde Director, confirmar actualización de estados en ambas vistas.
-- Revocación de dispositivo y confirmación de que deja de poder acceder.
-- Outbox con el sidecar detenido, reenvío automático al reconectar, sin duplicación.
-- Desconexión de Tailscale, confirmar que no hay fallback a la LAN común.
+### Hallazgo 1 (bug real de rc4): `NICOS_JARVIS_TRABAJO` no se leía -- fuga de datos reales de producción a la sesión de prueba
+
+Al abrir el tab "Resumen" de la instancia Director de prueba (con las 5 rutas financieras correctamente aisladas y verificadas por el script), se mostraron el PnL real del trading bot, estadísticas reales del consultorio y proyectos reales de cowork -- **datos de producción**, a pesar de que `run_test_director_mac.sh` exporta `NICOS_JARVIS_TRABAJO` apuntando a una carpeta de prueba vacía.
+
+**Causa**: `sidecar/server.py` leía la variable de entorno `JARVIS_TRABAJO_PATH` (sin prefijo `NICOS_`, inconsistente con el resto del sistema), no `NICOS_JARVIS_TRABAJO`. El propio `sidecar/tests/test_integration_dry_run.py` ya asumía el nombre correcto (`NICOS_JARVIS_TRABAJO`), lo que confirma que el nombre usado en `server.py` era el error, no el script ni el test.
+
+**Impacto**: de solo lectura (no se escribió nada en producción), pero rompía la garantía de aislamiento completo que esta ronda de pruebas existe para verificar.
+
+**Corrección**: `sidecar/server.py` línea 66-68, cambiado el nombre de la variable leída de `JARVIS_TRABAJO_PATH` a `NICOS_JARVIS_TRABAJO` (mismo valor por defecto, la ruta real de producción, para no romper el comportamiento en producción). Verificado tras el fix: el tab Resumen muestra "Sin datos" en los tres bloques, como corresponde a una carpeta de prueba vacía.
+
+### Hallazgo 2 (bug real de rc4): la UI del Director queda con el puerto del sidecar viejo tras "Guardar" en Ajustes
+
+Siguiendo el flujo documentado y exactamente el que pidió Nicolás (Ajustes → pegar IP de Tailscale → Guardar), el sidecar se reinicia correctamente (nuevo puerto efímero, confirmado por log), pero la ventana Electron del Director nunca se entera del puerto nuevo. Consecuencia: "Vincular nuevo dispositivo" no hacía nada visible (el fetch fallaba en silencio contra un proceso que ya no existía) -- y en realidad **toda** la UI (Resumen, Tareas, Chat, listado de dispositivos) quedaba rota de la misma forma hasta recargar toda la ventana a mano. Se confirmó también que un simple Cmd+R no alcanza para arreglarlo (la URL recargada trae el puerto viejo en el query string) -- hace falta cerrar y reabrir el proceso completo.
+
+**Causa**: `renderer/director/app.js` guarda el puerto del sidecar en una variable `API` fijada una sola vez al arrancar (`init()`); `renderer/shared/settings-panel-director.js` recibía ese mismo valor una sola vez como parámetro `apiBase`. Ninguno de los dos se actualizaba cuando `nicos:save-settings` reiniciaba el sidecar en un puerto nuevo -- a pesar de que el propio IPC ya devolvía el puerto nuevo (`{ok, port}`), ese valor de retorno se descartaba sin usar.
+
+**Impacto**: alto -- rompe el flujo de primer uso documentado (cargar la IP de Tailscale y vincular a Marianela en la misma sesión), exactamente el camino que sigue cualquier usuario real la primera vez que configura la app.
+
+**Corrección**:
+- `renderer/shared/settings-panel-director.js`: el handler de "Guardar" ahora usa el `port` que devuelve `saveSettings()`, reasigna la variable local `apiBase` (compartida por los listeners de pairing/revocar ya definidos, mismo binding) y llama a un callback `onPortChange` si se le pasó uno. También refresca la lista de dispositivos tras guardar.
+- `renderer/director/app.js`: nueva función `updateApiBase(newPort)` que actualiza `API` y vuelve a inicializar el tab de Tareas (`initTasksTab`); se pasa como callback a `renderSettingsPanelDirector`.
+
+Verificado tras el fix: "Guardar" con un cambio de IP de Tailscale reinicia el sidecar, y en la misma sesión (sin recargar nada) "Vincular nuevo dispositivo" generó un código real y el listado de dispositivos se actualizó solo.
+
+### Resultados de los 8 pasos (con las correcciones ya aplicadas)
+
+1. **IP de Tailscale registrada**: `100.114.131.64` (confirmada con `tailscale ip -4`).
+2. **Sidecar reiniciado con la interfaz disponible**: confirmado por log (`servidor de red (Tailscale) escuchando en 100.114.131.64:47500`), primero vía relanzamiento del script y después vía el flujo real de producción (Ajustes → Guardar).
+3. **Bind verificado**: `lsof` confirma el sidecar escuchando solo en `127.0.0.1:<puerto efímero>` (Director local) y `100.114.131.64:47500` (Tailscale) -- nunca en `192.168.0.113` (LAN normal de la Mac) ni en `0.0.0.0`.
+4. **Operativa configurada con la IP de Tailscale** (no localhost) en la pantalla de pairing.
+5. **Pairing + tarea + visibilidad en tiempo real + revocación**: pairing completado por la red real (`POST /api/v1/pairing/start` y `/pairing/complete`, ambos 200, por la IP de Tailscale). Tarea creada desde Operativa visible instantáneamente en la Bandeja del Director, con el nombre del dispositivo (`marianela`) y timestamp correctos. Sin claves de IA cargadas, la tarea termina en estado `Falló` en la clasificación -- comportamiento esperado y correcto (no hay forma de llegar a `pending_approval` sin IA real); aprobar/rechazar/pedir información ya se habían probado exhaustivamente contra la máquina de estados real en la fase sin red (mismo código HTTP, no hace falta repetir la lógica, solo el transporte). Revocación probada desde Ajustes del Director ("Revocar" → estado pasa a "Revocado"); confirmado que Operativa pierde acceso de inmediato -- el siguiente intento de listar tareas devuelve "token inválido o ausente".
+6. **Outbox con el sidecar detenido**: tarea enviada desde Operativa con el sidecar apagado quedó en cola ("1 en espera", mensaje "El ejecutor está desconectado"); al reiniciar el sidecar, el flush automático (cada 30s) la reenvió sola, sin duplicados -- confirmado también contra la base (`SELECT` sobre `tasks` muestra exactamente 2 filas para las 2 tareas de prueba enviadas, no 3).
+7. **Desconexión de Tailscale**: `tailscale down` -- confirmado con `curl` que el sidecar deja de responder tanto en la IP de Tailscale como en la IP LAN normal de la Mac (`192.168.0.113`) -- no existe ningún fallback a la LAN común. Reconectado con `tailscale up`; el sidecar volvió a responder solo, sin necesidad de reiniciarlo.
+8. **Smoke test de Claude/OpenAI**: pendiente -- requiere que Nicolás cargue sus propias API keys en la instancia Director de prueba, como ya había acordado.
+
+## Pendiente
+
 - Smoke test real de Claude y OpenAI (texto administrativo ficticio, extracción/clasificación real, cancelación final sin ejecutar nada) -- requiere que Nicolás cargue sus API keys en la instancia Director de prueba.
 
-No se tocó "Acerca de NicOS" (no existe todavía) -- queda para cuando se incorpore en rc5, junto con cualquier corrección que surja de las pruebas pendientes.
+No se tocó "Acerca de NicOS" (no existe todavía) -- queda para cuando se incorpore en rc5 (o el número de rc que corresponda una vez tageados los fixes de esta fase), junto con cualquier otra corrección pendiente antes del empaquetado.

@@ -5,7 +5,7 @@
 // `apiBase` es la URL del sidecar LOCAL (127.0.0.1:puerto) — se usa para pairing
 // y lista de dispositivos vinculados, que son operaciones de solo-Director.
 
-async function renderSettingsPanelDirector(containerEl, apiBase) {
+async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
   const current = await window.nicos.getMaskedSettings();
 
   containerEl.innerHTML = `
@@ -74,9 +74,21 @@ async function renderSettingsPanelDirector(containerEl, apiBase) {
     if (googleCreds) update.GOOGLE_SERVICE_ACCOUNT_JSON = googleCreds;
 
     try {
-      await window.nicos.saveSettings(update);
+      const result = await window.nicos.saveSettings(update);
+      if (result && result.port) {
+        // El sidecar se reinició en un puerto nuevo (efímero) -- si no
+        // actualizamos apiBase acá, todo lo que sigue usando este panel
+        // (vincular dispositivo, listar/revocar) queda apuntando a un
+        // proceso que ya no existe, sin ningún error visible (fetch a un
+        // puerto cerrado). Como `apiBase` es el mismo parámetro que ya
+        // capturaron los listeners de abajo, reasignarlo acá alcanza --
+        // comparten el mismo binding, no una copia.
+        apiBase = `http://127.0.0.1:${result.port}`;
+        if (onPortChange) onPortChange(result.port);
+      }
       statusEl.textContent = 'Guardado. El sidecar se reinició con la nueva configuración.';
       statusEl.style.color = 'var(--green)';
+      loadDevices();
     } catch (e) {
       statusEl.textContent = 'Error al guardar: ' + e.message;
       statusEl.style.color = 'var(--red)';

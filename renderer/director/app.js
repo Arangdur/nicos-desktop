@@ -158,9 +158,17 @@ function loadChat() {
   });
 }
 
+function updateApiBase(newPort) {
+  // Se llama cuando Ajustes reinicia el sidecar (nuevo puerto efímero) --
+  // sin esto, Resumen/Tareas/Chat quedan pegados al puerto viejo (ya
+  // muerto) hasta que se recargue toda la ventana a mano.
+  API = `http://127.0.0.1:${newPort}`;
+  initTasksTab(API);
+}
+
 function loadAjustes() {
   const el = document.getElementById('tab-ajustes');
-  renderSettingsPanelDirector(el, API);
+  renderSettingsPanelDirector(el, API, updateApiBase);
 }
 
 async function init() {
