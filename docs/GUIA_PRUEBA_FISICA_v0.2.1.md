@@ -8,7 +8,7 @@ Preparado para la sesión en persona con Nicolás (Director, Mac) y Marianela (O
 
 ## 0. Antes de empezar
 
-- [ ] Rama `feature/nicos-v0.2` en `00ef0cf` o más nuevo (`git log --oneline -1`), tag `v0.2.1-rc3`.
+- [ ] Rama `feature/nicos-v0.2`, con `git log --oneline -1` verificado ANTES de arrancar. **Nota de versión**: el tag `v0.2.1-rc3` marca el commit del fix de reconciliación (código + tests) — esta guía y los scripts de exportación de logs viven en commits posteriores, sin tag propio (`v0.2.1-rc3 └── commits de documentación/tooling, sin tag`). No es un problema, pero conviene saberlo: cuando terminen las pruebas físicas y se corrijan los hallazgos que aparezcan, el tag final `v0.2.1` tiene que apuntar al último commit, el que ya incluye esta documentación y esas correcciones — no a `v0.2.1-rc3`.
 - [ ] `npm install` corrido en la Mac (`cd "NicOS Desktop" && npm install`).
 - [ ] Sidecar con su venv armado (`cd sidecar && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`).
 - [ ] Confirmar que el suite de tests pasa antes de arrancar: `python3 sidecar/tests/run_all.py` → debe decir `16/16 archivos de test pasaron`.
@@ -46,9 +46,9 @@ tailscale ip -4
 
 ## 3. Instalar NicOS Operativa en la PC de Marianela
 
-No hay todavía un instalador `.exe` publicado (el repo no tiene remoto de GitHub configurado — el workflow de `.github/workflows/build-windows.yml` está listo pero nunca se disparó). Dos caminos, elegir uno:
+No hay todavía un instalador `.exe` generado. Dos caminos — **para la primera prueba física, usar la Opción A**; la Opción B (paquete real) es obligatoria antes de fusionar a `main`, pero puede quedar para una segunda sesión.
 
-### Opción A — Correr desde código fuente en la PC de Marianela (más simple para esta prueba, no requiere decidir nada sobre GitHub todavía)
+### Opción A — Correr desde código fuente en la PC de Marianela (para esta primera prueba)
 
 En la PC de Marianela:
 1. Instalar [Node.js LTS](https://nodejs.org) (incluye npm).
@@ -60,17 +60,36 @@ En la PC de Marianela:
    ```
 4. Al abrir, elegir rol **"Operativa"** en el selector — esta PC nunca debe arrancar el sidecar Python (el rol Operativa no lo hace, es un chequeo ya verificado por `test_operativa_permissions_403.py` y por el propio `main.js`).
 
-### Opción B — Generar el instalador `.exe` real (para cuando se decida publicar/distribuir)
-
-Requiere que Nicolás decida crear (o ya tenga) un repositorio de GitHub para este proyecto y autorice el push — **no hacer esto sin confirmarlo con él explícitamente**, es una acción que sale de esta Mac hacia un servicio externo. Una vez que el repo existe:
-```bash
-git remote add origin <URL del repo>
-git push -u origin feature/nicos-v0.2   # o main, según se decida fusionar
-```
-Después, disparar el workflow "Build Windows installer" manualmente desde la pestaña Actions de GitHub (`workflow_dispatch`), esperar a que termine (corre en `windows-latest`, compila el sidecar con PyInstaller y empaqueta con `electron-builder --win`), y descargar el artefacto `NicOS-Desktop-Windows-Installer` (un `.exe`). Copiarlo a la PC de Marianela e instalarlo — Windows SmartScreen va a advertir "editor desconocido" (no está firmado); click "Más información" → "Ejecutar de todas formas".
+Ventaja de este camino para la primera prueba: permite depurar rápido y separa errores funcionales de errores de empaquetado.
 
 - [ ] La app abre en la PC de Marianela sin errores.
 - [ ] Selector de rol aparece la primera vez (si no aparece, alguien ya eligió un rol antes en esta PC — ver "Desinstalación" más abajo para resetear).
+
+### Opción B — Generar el `.exe` real empaquetado (obligatorio antes de fusionar a `main`)
+
+**No hace falta GitHub para esto.** `electron-builder` empaqueta localmente, en la misma PC Windows — no requiere subir el código a ningún lado. Directamente en la PC de Marianela, con la carpeta del proyecto copiada (mismo paso 2 de la Opción A):
+
+```powershell
+cd sidecar
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+pyinstaller --onefile --name nicos-sidecar --distpath dist --workpath build --specpath . server.py
+cd ..
+npm install
+npx electron-builder --win
+```
+
+El instalador queda en `dist\*.exe`. Windows SmartScreen va a advertir "editor desconocido" (no está firmado) — "Más información" → "Ejecutar de todas formas".
+
+*(Alternativa, si en algún momento se decide tener el proyecto en GitHub para CI: el workflow `.github/workflows/build-windows.yml` ya está escrito y hace exactamente estos mismos pasos en `windows-latest`, subiendo el `.exe` como artefacto. Requiere crear/usar un repo y autorizar el push — **no hacer esto sin confirmarlo explícitamente con Nicolás en el momento**, es una decisión suya, no algo para resolver de antemano.)*
+
+**Por qué esto es obligatorio antes del merge, no opcional**: un empaquetado de Electron puede fallar de formas que `npm start` nunca muestra — rutas relativas rotas, el sidecar no encontrado en su ubicación empaquetada, permisos de Windows, firewall bloqueando el puerto de Tailscale, `safeStorage` sin proveedor de cifrado disponible en esa PC, archivos que quedaron afuera del build, actualización del outbox, inicio automático, o el propio antivirus/SmartScreen interfiriendo. Repetir como mínimo los pasos 4 (crear tarea → aprobar) y 7 (outbox desconectado) del checklist de abajo, pero contra el `.exe` instalado, no contra `npm start`.
+
+- [ ] El `.exe` se generó sin errores.
+- [ ] Instalado y abierto en la PC de Marianela, sin errores.
+- [ ] Repetir el paso 5 (flujo de tareas) contra el paquete instalado.
+- [ ] Repetir el paso 7 (outbox desconectado) contra el paquete instalado.
 
 ## 4. Pairing real Mac ↔ Windows
 
@@ -175,7 +194,25 @@ Test-NetConnection -ComputerName <IP-de-la-Mac> -Port 47500
 
 ## 11. Exportar logs de ambas máquinas
 
-Ver `scripts/exportar_logs_mac.sh` (Mac) y `scripts/exportar_logs_windows.ps1` (Windows) — juntan en una carpeta con fecha: el estado de Tailscale, la salida de `npm start` si se corrió con logging a archivo, una copia de `nicos.db` (solo de la Mac — nunca sale de ahí ningún secreto real, la base tiene tokens *hasheados*, no en texto plano), y la lista de dispositivos pareados. Instrucciones de uso dentro de cada script (comentario al principio).
+Ver `scripts/exportar_logs_mac.sh` (Mac) y `scripts/exportar_logs_windows.ps1` (Windows). **Por defecto generan un reporte SANITIZADO**, no una copia de la base — `nicos.db` puede tener texto original de tareas, importes, resultados financieros y otros datos operativos, así que no sale por defecto:
+
+```bash
+# Mac, reporte sanitizado (conteos por estado, IDs, timestamps, sin contenido):
+bash scripts/exportar_logs_mac.sh
+
+# Mac, si hace falta la copia ÍNTEGRA de nicos.db para depurar algo puntual
+# (el script avisa antes de copiarla):
+bash scripts/exportar_logs_mac.sh --include-database
+```
+
+```powershell
+# Windows -- esta PC no tiene nicos.db (el sidecar solo corre en la Mac), y el
+# script nunca copia el token del dispositivo ni el contenido del outbox
+# (solo indica si están configurados y cuántos ítems hay en cola):
+powershell -ExecutionPolicy Bypass -File scripts\exportar_logs_windows.ps1
+```
+
+Instrucciones completas dentro de cada script (comentario al principio).
 
 Para capturar la salida de la app mientras se corre la prueba (recomendado, no es automático hoy):
 ```bash
