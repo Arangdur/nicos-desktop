@@ -6,8 +6,9 @@ Este informe reemplaza a `REPORTE_PRUEBAS_v0.2.1-rc1.md` (que queda como registr
 
 | Campo | Valor |
 |---|---|
-| Commit SHA (este informe corresponde a) | `b875c82d1578233049235e9348666409a5153251` |
-| Tag | `v0.2.1-rc2` |
+| Commit SHA (código + tests que este informe reporta) | `b875c82d1578233049235e9348666409a5153251` |
+| Commit SHA (agrega este mismo informe encima del anterior — al que apunta el tag) | `70a7a06` |
+| Tag `v0.2.1-rc2` apunta a | `70a7a06` (el commit que agrega este informe) |
 | Rama | `feature/nicos-v0.2` (no fusionada a `main`) |
 | Commit anterior (v0.2.1-rc1) | `15e14ef06067655b466104eda3873c361bfc4494` |
 | OS | macOS 15.6.1 (Sequoia), build 24G90, Darwin 24.6.0, arm64 |
