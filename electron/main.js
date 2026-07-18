@@ -16,6 +16,7 @@ function _envFromConfig(config) {
   if (config.WHATSAPP_SHEET_ID) env.WHATSAPP_SHEET_ID = config.WHATSAPP_SHEET_ID;
   if (config.ANTHROPIC_MODEL) env.ANTHROPIC_MODEL = config.ANTHROPIC_MODEL;
   if (config.OPENAI_MODEL) env.OPENAI_MODEL = config.OPENAI_MODEL;
+  if (config.TAILSCALE_IP) env.NICOS_TAILSCALE_IP = config.TAILSCALE_IP;
   return env;
 }
 
@@ -112,6 +113,18 @@ ipcMain.handle('nicos:save-settings', async (_event, update) => {
 });
 
 ipcMain.handle('nicos:set-role', async (_event, role) => {
+  // v0.2.1: una vez que esta PC eligió "operativa", no se puede volver a
+  // "director" desde la UI -- si es un error real (esta es la Mac de
+  // Nicolás), la salida deliberada es borrar el archivo de configuración a
+  // mano y reiniciar, no un botón de la app. Esto es la restricción de rol
+  // aplicada en el proceso principal, no solo escondida en el renderer.
+  const currentRole = settingsStore.getRole();
+  if (currentRole === 'operativa' && role === 'director') {
+    throw new Error(
+      'Esta PC ya está configurada como Operativa — no se puede cambiar a Director desde acá. ' +
+      'Si esto es un error, borrá el archivo de configuración de NicOS a mano y reiniciá la app.'
+    );
+  }
   settingsStore.saveSettings({ role });
   if (mainWindow) await _bootAndLoad();
   return { ok: true };

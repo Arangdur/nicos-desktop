@@ -1,0 +1,15 @@
+{
+  "_nota": "Los 10 movimientos reales cargados el 17/07/2026 (REGISTRO_ENTRADA.md, 00:07-00:18), reconstruidos como texto descriptivo + resultado esperado. Nunca se re-ejecutan contra foto_financiera_julio2026.md real -- solo se usan para probar classify_request/evaluate_risk (Etapa 7) y, en Etapa 10, el flujo completo contra archivos temporales.",
+  "casos": [
+    {"concept": "Funda de teléfono", "amount": 35000.0, "date": "2026-07-17", "tipo": "gasto", "expected_domain": "cfo", "expected_intent": "register_expense", "expected_risk": "simple"},
+    {"concept": "VR Arena", "amount": 180000.0, "date": "2026-07-17", "tipo": "gasto", "expected_domain": "cfo", "expected_intent": "register_expense", "expected_risk": "simple"},
+    {"concept": "Cena con mi esposa", "amount": 100000.0, "date": "2026-07-17", "tipo": "gasto", "expected_domain": "cfo", "expected_intent": "register_expense", "expected_risk": "simple"},
+    {"concept": "Starbucks", "amount": 34400.0, "date": "2026-07-17", "tipo": "gasto", "expected_domain": "cfo", "expected_intent": "register_expense", "expected_risk": "simple"},
+    {"concept": "Resina epoxi", "amount": 132000.0, "date": "2026-07-17", "tipo": "gasto", "expected_domain": "cfo", "expected_intent": "register_expense", "expected_risk": "simple"},
+    {"concept": "Brunch Le Blé", "amount": 92400.0, "date": "2026-07-17", "tipo": "gasto", "expected_domain": "cfo", "expected_intent": "register_expense", "expected_risk": "simple"},
+    {"concept": "Extravío de dinero", "amount": 100000.0, "date": "2026-07-17", "tipo": "gasto", "expected_domain": "cfo", "expected_intent": "register_expense", "expected_risk": "simple"},
+    {"concept": "Parking", "amount": 19200.0, "date": "2026-07-17", "tipo": "gasto", "expected_domain": "cfo", "expected_intent": "register_expense", "expected_risk": "simple"},
+    {"concept": "Hospital Posse - consultas psiquiatría", "amount": 1755000.0, "date": "2026-07-17", "tipo": "ingreso", "expected_domain": "cfo", "expected_intent": "register_income", "expected_risk": "simple"},
+    {"concept": "Regalo", "amount": 300000.0, "date": "2026-07-17", "tipo": "gasto", "expected_domain": "cfo", "expected_intent": "register_expense", "expected_risk": "simple"}
+  ]
+}

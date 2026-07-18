@@ -19,7 +19,7 @@ const DIRECTOR_SECRET_KEYS = [
   'OPENAI_API_KEY',
   'GOOGLE_SERVICE_ACCOUNT_JSON',
 ];
-const DIRECTOR_PLAIN_KEYS = ['WHATSAPP_SHEET_ID', 'ANTHROPIC_MODEL', 'OPENAI_MODEL'];
+const DIRECTOR_PLAIN_KEYS = ['WHATSAPP_SHEET_ID', 'ANTHROPIC_MODEL', 'OPENAI_MODEL', 'TAILSCALE_IP'];
 
 // El token de dispositivo ES un secreto (da acceso a la Mac) — se cifra igual
 // que las API keys, aunque conceptualmente sea "de otro tipo".
@@ -96,8 +96,19 @@ function getMaskedConfig() {
 
 function saveSettings(update) {
   const raw = _readRaw();
-  const role = update.role || raw.role || 'director';
+  const role = update.role !== undefined ? update.role : (raw.role || 'director');
   const { secret, plain } = _keysForRole(role);
+
+  // v0.2.1: antes esto ignoraba en silencio cualquier clave que no perteneciera
+  // al rol actual (ej. Operativa intentando guardar ANTHROPIC_API_KEY). Ahora
+  // rechaza explícitamente para que quede auditable en vez de invisible — es
+  // la restricción de rol aplicada en el proceso principal, no solo en la UI.
+  const allowedKeys = new Set([...COMMON_PLAIN_KEYS, ...plain, ...secret]);
+  for (const key of Object.keys(update)) {
+    if (!allowedKeys.has(key)) {
+      throw new Error(`La clave "${key}" no pertenece al rol "${role}" — guardado rechazado.`);
+    }
+  }
 
   if (update.role !== undefined) raw.role = update.role;
 

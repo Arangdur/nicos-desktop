@@ -6,3 +6,9 @@ sidecar/dist/
 sidecar/__pycache__/
 *.pyc
 .DS_Store
+sidecar/nicos.db
+sidecar/nicos.db-wal
+sidecar/nicos.db-shm
+sidecar/nicos.db.bak-*
+sidecar/backups/
+sidecar/attachments/

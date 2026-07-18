@@ -31,6 +31,10 @@
         {
           "from": "sidecar/dist/nicos-sidecar",
           "to": "sidecar/nicos-sidecar"
+        },
+        {
+          "from": "policies",
+          "to": "policies"
         }
       ]
     },
@@ -40,6 +44,10 @@
         {
           "from": "sidecar/dist/nicos-sidecar.exe",
           "to": "sidecar/nicos-sidecar.exe"
+        },
+        {
+          "from": "policies",
+          "to": "policies"
         }
       ]
     },

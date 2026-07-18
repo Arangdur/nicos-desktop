@@ -4,14 +4,21 @@ compartida: un código corto de un solo uso (5 min) autoriza la emisión de un
 token de dispositivo de 256 bits, revocable individualmente. El token en sí
 nunca se guarda en la base — solo su hash (misma lógica que una contraseña),
 así que un volcado de nicos.db no expone tokens utilizables.
+
+Rate limiting (v0.2.1): 5+ intentos fallidos contra el mismo código en los
+últimos 5 minutos lo invalida aunque no haya vencido su TTL — cada intento
+(éxito o fracaso) queda en `pairing_attempts`.
 """
 import datetime
 import hashlib
+import hmac
 import secrets
 
 import db
 
 PAIRING_CODE_TTL_MINUTES = 5
+MAX_FAILED_ATTEMPTS = 5
+FAILED_ATTEMPTS_WINDOW_MINUTES = 5
 
 
 def _now_iso():
@@ -41,19 +48,49 @@ class PairingError(Exception):
     pass
 
 
+def _record_attempt(code: str, success: bool):
+    conn = db.get_connection()
+    conn.execute(
+        "INSERT INTO pairing_attempts (code_attempted, success, created_at) VALUES (?, ?, ?)",
+        (code, 1 if success else 0, _now_iso()),
+    )
+    conn.commit()
+
+
+def _too_many_failed_attempts(code: str) -> bool:
+    conn = db.get_connection()
+    cutoff = (datetime.datetime.utcnow() - datetime.timedelta(minutes=FAILED_ATTEMPTS_WINDOW_MINUTES)).isoformat()
+    row = conn.execute(
+        "SELECT COUNT(*) as n FROM pairing_attempts WHERE code_attempted = ? AND success = 0 AND created_at > ?",
+        (code, cutoff),
+    ).fetchone()
+    return row["n"] >= MAX_FAILED_ATTEMPTS
+
+
 def complete_pairing(code: str, device_name: str, user_id: str = "marianela") -> dict:
-    """Valida el código (sin usar, no vencido) y emite un token nuevo de dispositivo.
-    El token se devuelve UNA sola vez acá — el llamador es responsable de guardarlo
-    de forma segura (safeStorage en el cliente Electron); el server nunca lo vuelve
-    a mostrar, solo puede verificar su hash a futuro.
+    """Valida el código (sin usar, no vencido, sin demasiados intentos fallidos
+    recientes) y emite un token nuevo de dispositivo. El token se devuelve UNA
+    sola vez acá — el llamador es responsable de guardarlo de forma segura
+    (safeStorage en el cliente Electron); el server nunca lo vuelve a mostrar,
+    solo puede verificar su hash a futuro.
     """
+    if _too_many_failed_attempts(code):
+        _record_attempt(code, success=False)
+        raise PairingError(
+            f"Demasiados intentos fallidos con este código ({MAX_FAILED_ATTEMPTS}+ en "
+            f"{FAILED_ATTEMPTS_WINDOW_MINUTES} min) — se invalidó por seguridad. Generá uno nuevo desde Ajustes."
+        )
+
     conn = db.get_connection()
     row = conn.execute("SELECT * FROM pairing_codes WHERE code = ?", (code,)).fetchone()
     if row is None:
+        _record_attempt(code, success=False)
         raise PairingError("Código inválido.")
     if row["used_at"] is not None:
+        _record_attempt(code, success=False)
         raise PairingError("Este código ya se usó — generá uno nuevo desde Ajustes.")
     if datetime.datetime.fromisoformat(row["expires_at"]) < datetime.datetime.utcnow():
+        _record_attempt(code, success=False)
         raise PairingError("Este código venció (duran 5 minutos) — generá uno nuevo.")
 
     token = secrets.token_urlsafe(32)
@@ -67,20 +104,23 @@ def complete_pairing(code: str, device_name: str, user_id: str = "marianela") ->
     )
     conn.execute("UPDATE pairing_codes SET used_at = ? WHERE code = ?", (now, code))
     conn.commit()
+    _record_attempt(code, success=True)
 
     return {"device_id": device_id, "token": token}
 
 
 def verify_token(token: str):
-    """Devuelve la fila de `devices` si el token es válido y no está revocado, si no None."""
+    """Devuelve la fila de `devices` si el token es válido y no está revocado, si no None.
+    Comparación con hmac.compare_digest (tiempo constante) por defensa en profundidad,
+    aunque el token ya viaja dentro de la red cifrada de Tailscale."""
     if not token:
         return None
     conn = db.get_connection()
-    row = conn.execute(
-        "SELECT * FROM devices WHERE token_hash = ? AND revoked_at IS NULL",
-        (_hash_token(token),),
-    ).fetchone()
-    return row
+    token_hash = _hash_token(token)
+    for row in conn.execute("SELECT * FROM devices WHERE revoked_at IS NULL"):
+        if hmac.compare_digest(row["token_hash"], token_hash):
+            return row
+    return None
 
 
 def list_devices():

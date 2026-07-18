@@ -109,12 +109,40 @@ async function toggleTaskDetail(taskId) {
   }
   const task = data.task;
 
+  // Si needs_review vino de una interrupción a mitad de ejecución (worker.
+  // recover_orphaned_tasks dejó "reconciliacion" en el detail_json del último
+  // evento), se muestran las 4 opciones de resolución en vez del botón
+  // genérico de cancelar -- ver tasks.resolve_execution.
+  let reconciliacionInfo = null;
+  if (task.state === 'needs_review') {
+    for (let i = data.events.length - 1; i >= 0; i--) {
+      let detail = data.events[i].detail_json;
+      if (typeof detail === 'string') {
+        try { detail = JSON.parse(detail); } catch (e) { detail = null; }
+      }
+      if (detail && detail.reconciliacion) {
+        reconciliacionInfo = detail;
+        break;
+      }
+    }
+  }
+
   let actionButtons = '';
   if (task.state === 'pending_approval') {
     actionButtons = `
       <div style="margin-top:12px; display:flex; gap:8px;">
-        <button class="primary btn-approve" data-id="${taskId}" data-hash="${task.action_version_hash}">Aprobar</button>
+        <button class="primary btn-approve" data-id="${taskId}" data-hash="${task.action_version_hash}" data-revision="${task.task_revision}">Aprobar (rev. ${task.task_revision})</button>
         <button class="secondary btn-reject" data-id="${taskId}">Rechazar</button>
+      </div>
+    `;
+  } else if (task.state === 'needs_review' && reconciliacionInfo) {
+    actionButtons = `
+      <div class="error-box" style="margin-top:12px;">${escHtmlTasks(reconciliacionInfo.aviso || '')}</div>
+      <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="primary btn-resolve" data-id="${taskId}" data-decision="confirm_executed">Confirmar ejecutada</button>
+        <button class="secondary btn-resolve" data-id="${taskId}" data-decision="confirm_not_executed_retry">Confirmar NO ejecutada y reintentar</button>
+        <button class="secondary btn-resolve" data-id="${taskId}" data-decision="cancel">Cancelar</button>
+        <button class="secondary btn-resolve" data-id="${taskId}" data-decision="keep_in_review">Mantener en revisión</button>
       </div>
     `;
   } else if (task.state === 'needs_information' || task.state === 'needs_review') {
@@ -143,7 +171,10 @@ async function toggleTaskDetail(taskId) {
     btn.addEventListener('click', async () => {
       const res = await fetch(`${tasksApiBase}/api/v1/tasks/${btn.dataset.id}/approve`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approved_action_hash: btn.dataset.hash }),
+        body: JSON.stringify({
+          approved_action_hash: btn.dataset.hash,
+          approved_task_revision: parseInt(btn.dataset.revision, 10),
+        }),
       });
       const result = await res.json();
       if (!result.ok) {
@@ -158,6 +189,24 @@ async function toggleTaskDetail(taskId) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'Rechazada desde la Bandeja de tareas' }),
       });
+      renderTasksList();
+    });
+  });
+  detailEl.querySelectorAll('.btn-resolve').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const decision = btn.dataset.decision;
+      let reason = null;
+      if (decision === 'keep_in_review') {
+        reason = prompt('Nota opcional sobre por qué queda en revisión:') || ''; // eslint-disable-line no-alert
+      }
+      const res = await fetch(`${tasksApiBase}/api/v1/tasks/${btn.dataset.id}/resolve-execution`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision, reason }),
+      });
+      const result = await res.json();
+      if (!result.ok) {
+        alert(result.error); // eslint-disable-line no-alert
+      }
       renderTasksList();
     });
   });

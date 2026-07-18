@@ -10,11 +10,17 @@
     <div class="card">
       <h3>Vincular esta PC con la Mac de Nicolás</h3>
       <p style="font-size:13px; color:var(--muted); margin-bottom:16px;">
+        Esta app se conecta a través de <b>Tailscale</b> (red privada, no la red WiFi de la
+        oficina) — necesitás tener Tailscale instalado en esta PC y conectado a la misma
+        cuenta que la Mac de Nicolás antes de seguir. Si no lo tenés, pedile a Nicolás el
+        instalador y las credenciales.
+      </p>
+      <p style="font-size:13px; color:var(--muted); margin-bottom:16px;">
         En la Mac: Director → Ajustes → "Vincular nuevo dispositivo" genera un código de 6 dígitos,
         válido 5 minutos. Pedíselo a Nicolás y escribilo acá.
       </p>
-      <label>IP de la Mac en la red local (ej. 192.168.1.4)</label>
-      <input type="text" id="mac-host" placeholder="192.168.1.4">
+      <label>IP de Tailscale de la Mac (empieza con 100., ej. 100.101.102.5 — NO la IP de WiFi de la oficina)</label>
+      <input type="text" id="mac-host" placeholder="100.x.y.z">
       <label>Puerto (dejalo así salvo que Nicolás te diga otro)</label>
       <input type="text" id="mac-port" value="47500">
       <label>Código de 6 dígitos</label>

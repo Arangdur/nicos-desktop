@@ -38,6 +38,74 @@ para el plan completo aprobado.
    de todas formas" en Windows SmartScreen) — evaluar certificados pagos si se distribuye más
    ampliamente.
 
+## Rollback (v0.2.1)
+
+Si el flujo de tareas/aprobación (`/api/v1/tasks*`) causa un problema y hace falta
+"apagarlo" rápido sin tocar código:
+
+```bash
+export NICOS_TASK_FLOW_ENABLED=false
+```
+
+Con esto, `/api/v1/tasks*` devuelve 503 con mensaje claro; `/director/summary` y
+`/director/chat` (lo que ya funcionaba en v0.1) siguen andando igual.
+
+Para un rollback de código más de fondo: `git checkout v0.1-freeze` o
+`v0.2-tareas-aprobacion` según hasta dónde haya que volver (tags en este repo).
+
+**Ningún procedimiento de rollback — ni el feature flag, ni `git checkout`, ni
+restaurar un backup de `nicos.db`— revierte automáticamente un movimiento
+financiero que ya se escribió en `foto_financiera_*.md` real.** Eso, si hace
+falta deshacerlo, lo hace Nicolás a mano, usando `execution_attempts` y
+`task_events` (dentro de `nicos.db`) como evidencia de qué se ejecutó, cuándo,
+y con qué `operation_id`. Antes de cualquier migración nueva de esquema, `db.py`
+ya hace un backup automático de `nicos.db` a `sidecar/backups/` — restaurar uno
+de esos backups recupera el estado de auditoría/aprobaciones, pero tampoco
+deshace efectos externos ya ocurridos.
+
+## Red — Tailscale y ACL (v0.2.1-rc1)
+
+**Garantía a nivel de aplicación (no depende de Tailscale ni de ninguna ACL)**:
+el servidor de RED (el que escucha en la IP de Tailscale, usado por la PC de
+Marianela) nunca registra `/api/v1/pairing/start` ni `/api/v1/devices*` ni
+`/api/v1/tasks/*/approve|reject|request-info|resolve-execution` como rutas
+alcanzables — `Handler._is_lan()` las bloquea con 403 sin importar si el
+`Authorization: Bearer <token>` es válido. Esto es más fuerte que cualquier
+ACL externa porque no depende de configuración: aunque la PC de Marianela
+reinstale la app, borre su configuración, o alguien modifique las requests a
+mano, esas rutas siguen sin existir del lado de la red. Ver
+`sidecar/tests/test_operativa_permissions_403.py`.
+
+**ACL de Tailscale, como capa adicional (defensa en profundidad)** — no es la
+única garantía, pero limita a nivel de red quién puede siquiera intentar
+llegar al puerto de NicOS (47500 por default), por si en el futuro se agrega
+una ruta nueva sin el chequeo `is_lan()` de arriba. Ejemplo de política (se
+configura en el admin console de Tailscale, no en este repo):
+
+```json
+{
+  "tagOwners": {
+    "tag:nicos-director": ["nicolas@ejemplo.com"],
+    "tag:nicos-operativa": ["nicolas@ejemplo.com"]
+  },
+  "acls": [
+    {
+      "action": "accept",
+      "src": ["tag:nicos-operativa"],
+      "dst": ["tag:nicos-director:47500"]
+    }
+  ]
+}
+```
+
+Pasos: taggear la Mac de Nicolás como `tag:nicos-director` y la PC de
+Marianela como `tag:nicos-operativa` desde el admin console de Tailscale;
+esta ACL hace que NINGÚN otro dispositivo de la red de Tailscale (aunque esté
+en la misma cuenta) pueda alcanzar el puerto 47500, ni siquiera para intentar
+un pairing con un código robado. El pairing sigue exigiendo además el código
+de 6 dígitos + rate limiting (`pairing.py`) — la ACL y el código son capas
+independientes, no una sustituye a la otra.
+
 ## Cómo correr en desarrollo
 
 ```bash

@@ -23,6 +23,18 @@ async function renderSettingsPanelDirector(containerEl, apiBase) {
     </div>
 
     <div class="card">
+      <h3>Red — Tailscale</h3>
+      <p style="font-size:13px; color:var(--muted);">
+        La PC de Marianela se conecta a través de Tailscale, nunca por la red WiFi de la
+        oficina en claro. Necesitás tener Tailscale instalado y logueado en esta Mac
+        (<code>brew install tailscale && sudo tailscale up</code>), y después pegar acá
+        la IP que te da <code>tailscale ip -4</code>.
+      </p>
+      <label>IP de Tailscale de esta Mac (empieza con 100.)</label>
+      <input type="text" id="tailscale-ip" value="${current.TAILSCALE_IP || ''}" placeholder="100.x.y.z">
+    </div>
+
+    <div class="card">
       <h3>Google Sheets — Bot WhatsApp Consultorio</h3>
       <label>ID de la planilla (de la URL de Google Sheets)</label>
       <input type="text" id="sheet-id" value="${current.WHATSAPP_SHEET_ID || ''}" placeholder="1AbCdEfGh...">
@@ -52,6 +64,7 @@ async function renderSettingsPanelDirector(containerEl, apiBase) {
       ANTHROPIC_MODEL: containerEl.querySelector('#anthropic-model').value.trim(),
       OPENAI_MODEL: containerEl.querySelector('#openai-model').value.trim(),
       WHATSAPP_SHEET_ID: containerEl.querySelector('#sheet-id').value.trim(),
+      TAILSCALE_IP: containerEl.querySelector('#tailscale-ip').value.trim(),
     };
     const anthropicKey = containerEl.querySelector('#anthropic-key').value.trim();
     const openaiKey = containerEl.querySelector('#openai-key').value.trim();

@@ -1,0 +1,28 @@
+# Política canónica de clasificación y riesgo — Centro de Mando / NicOS.
+#
+# Esta es la ÚNICA fuente ejecutable de esta regla. `Centro de Mando/CLAUDE.md`
+# la referencia en vez de restatearla con su propio texto independiente, para
+# no terminar con dos versiones que puedan divergir silenciosamente.
+#
+# Antes de modificar valores acá, correr
+# sidecar/tests/test_risk_policy_characterization.py — compara los 10 casos
+# reales del 17/07/2026 contra el resultado ya conocido y verificado. Si algo
+# cambia acá y ese test no fue actualizado a propósito, algo se rompió.
+version: 1
+
+supported_domains: [cfo, abate]
+
+# Intents que son "transcribir algo que ya pasó" — la única excepción para no
+# pedir OK ("es transcribir lo que Nicolás mismo contó, no una decisión
+# nueva"). Cualquier otro intent (pagar, transferir, autorizar) requiere
+# aprobación por defecto — ver evaluate_risk en centro_mando_adapter.py.
+logging_intents: [register_expense, register_income]
+
+required_fields_cfo: [amount, date, concept]
+
+regla_texto: >
+  Si un gasto/ticket es claramente institucional (Fundación, consultorio
+  compartido, personal de Abate) va a "abate"; si es personal/de Nicolás va a
+  "cfo". Cargar un movimiento que Nicolás ya contó es SIMPLE (no requiere OK)
+  porque es transcribir, no decidir. Cualquier acción financiera nueva
+  (pagar, transferir, autorizar) requiere aprobación.

@@ -28,6 +28,13 @@ async function loadEntradaRapida() {
     const statusEl = document.getElementById('entrada-status');
     if (!texto) return;
 
+    const clinico = detectClinicalData(texto);
+    if (clinico.blocked) {
+      statusEl.textContent = clinico.reason + ' NicOS no maneja datos de pacientes — consultale a Nicolás el canal correcto.';
+      statusEl.style.color = 'var(--red)';
+      return;
+    }
+
     statusEl.textContent = 'Enviando...';
     statusEl.style.color = 'var(--muted)';
     const result = await window.nicos.operativaSubmitTask(texto);

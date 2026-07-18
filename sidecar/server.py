@@ -7,10 +7,16 @@ Corre DOS servidores HTTP en el mismo proceso:
   - servidor LOCAL, bind 127.0.0.1, puerto elegido por el SO (igual que v0.1) — lo usa
     la propia app Electron del Director (Nicolás), en la misma máquina. Confiado por
     definición (solo un proceso local puede llegar a 127.0.0.1) — sin verificación de token.
-  - servidor LAN, bind 0.0.0.0, puerto FIJO (NICOS_LAN_PORT) — lo usa la app Electron
-    de la vista Operativa (Marianela) desde la PC Windows, por la red local. Todas las
-    rutas de tareas requieren `Authorization: Bearer <token>` emitido por el pairing
-    (ver pairing.py); nunca acepta credenciales de IA/Google — esas viven solo en la Mac.
+  - servidor de RED (v0.2.1: Tailscale, ya NO 0.0.0.0), puerto FIJO (NICOS_LAN_PORT) —
+    lo usa la app Electron de la vista Operativa (Marianela) desde la PC Windows, a
+    través de la red privada cifrada de Tailscale (nunca la LAN doméstica en claro).
+    Bindea específicamente a NICOS_TAILSCALE_IP (obtenida con `tailscale ip -4` en
+    esta Mac). Si esa variable no está seteada o `tailscale status` no confirma que
+    el daemon esté corriendo, el servidor de red queda DESHABILITADO por completo
+    (nunca cae a 0.0.0.0 como fallback) — se loguea claro por qué. Todas las rutas
+    de tareas requieren `Authorization: Bearer <token>` emitido por el pairing (ver
+    pairing.py), con rate limiting de intentos; nunca acepta credenciales de
+    IA/Google — esas viven solo en la Mac.
 
 Rutas nuevas de v0.2 bajo /api/v1/* (flujo de tareas con aprobación). Las rutas de v0.1
 (/ping, /whatsapp/*, /director/*) siguen igual, solo servidas por el servidor LOCAL —
@@ -19,6 +25,7 @@ funciones del Director en su propia máquina).
 """
 import json
 import os
+import subprocess
 import sys
 import threading
 import traceback
@@ -27,12 +34,34 @@ from urllib.parse import urlparse
 
 import ai_router
 import centro_mando_adapter
+import clinical_guard
 import db
 import pairing
 import sheets_client
 import tasks
+import worker
 
 LAN_PORT = int(os.getenv("NICOS_LAN_PORT", "47500"))
+TAILSCALE_IP = os.getenv("NICOS_TAILSCALE_IP", "").strip()
+
+# Rollback real (v0.2.1): apaga el flujo de tareas/aprobación sin tocar código
+# ni perder lo demás -- /director/summary y /director/chat (lo que ya andaba
+# en v0.1) siguen funcionando igual. No revierte movimientos ya ejecutados ni
+# datos ya escritos en nicos.db -- eso, si hace falta, es manual (ver README).
+TASK_FLOW_ENABLED = os.getenv("NICOS_TASK_FLOW_ENABLED", "true").strip().lower() != "false"
+
+
+def _tailscale_running() -> bool:
+    """Confirma que el daemon de Tailscale está activo, no solo que la variable
+    de entorno esté seteada — evita bindear a una IP que ya no es válida (ej. el
+    usuario desinstaló Tailscale pero la variable quedó vieja en el .env)."""
+    try:
+        result = subprocess.run(
+            ["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
 
 JARVIS_TRABAJO_PATH = os.getenv(
     "JARVIS_TRABAJO_PATH",
@@ -64,69 +93,6 @@ def _director_summary():
         data = _read_json_safe(path)
         summary[key] = data if data is not None else {"_missing": True, "archivo": filename}
     return summary
-
-
-def _process_task_async(task_id: str):
-    """Corre en un thread aparte: parsing -> classified -> (needs_information |
-    pending_approval | ready) -> si es 'ready', ejecuta. Nunca bloquea la respuesta
-    HTTP de creación de la tarea."""
-    try:
-        task = tasks.get_task_dict(task_id)
-        tasks.transition(task_id, "parsing", "system")
-
-        extraction = ai_router.extract(task["raw_text"])
-        if not extraction.get("ok"):
-            # falla técnica de extracción (ej. sin API keys configuradas) -> 'failed',
-            # no 'needs_review' (ese estado es para cuando SÍ se clasificó pero no se
-            # puede automatizar, ej. dominio abate — ver más abajo).
-            tasks.transition(
-                task_id, "failed", "system",
-                detail={"motivo": "extracción falló", "error": extraction.get("error")},
-                error_message=extraction.get("error"),
-            )
-            return
-
-        extracted = extraction["data"]
-        domain = centro_mando_adapter.classify_request(extracted)
-        if domain is None:
-            tasks.transition(
-                task_id, "needs_information", "system",
-                detail={"pregunta": "No pude determinar si esto es de CFO o de Abate — ¿podés aclararlo?"},
-                domain=extracted.get("domain"), intent=extracted.get("intent"), extracted_json=extracted,
-            )
-            return
-
-        risk = centro_mando_adapter.evaluate_risk(domain, extracted.get("intent"), extracted)
-        tasks.transition(
-            task_id, "classified", "ai",
-            detail={"extraction_provider": extraction.get("provider")},
-            domain=domain, intent=extracted.get("intent"), extracted_json=extracted, risk_level=risk,
-        )
-
-        prepared = centro_mando_adapter.prepare_action(domain, extracted.get("intent"), extracted)
-        action_hash = tasks.compute_action_hash(prepared)
-
-        if risk == "simple":
-            tasks.transition(task_id, "ready", "system", action_version_hash=action_hash,
-                              detail={"prepared_action": prepared})
-        else:
-            tasks.transition(task_id, "pending_approval", "system", action_version_hash=action_hash,
-                              detail={"prepared_action": prepared})
-            return  # espera aprobación humana — no se ejecuta acá
-
-        _execute_ready_task(task_id, prepared)
-    except Exception as e:
-        sys.stderr.write("[sidecar] ERROR procesando tarea: " + traceback.format_exc() + "\n")
-        try:
-            tasks.transition(task_id, "needs_review", "system", detail={"error": str(e)})
-        except Exception:
-            pass
-
-
-def _execute_ready_task(task_id: str, prepared_action: dict):
-    tasks.transition(task_id, "executing", "system")
-    result = centro_mando_adapter.execute_action(prepared_action)
-    centro_mando_adapter.record_result(task_id, "system", result)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -186,6 +152,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/ping":
                 self._send_json(200, {"ok": True})
+                return
+
+            if path.startswith("/api/v1/tasks") and not TASK_FLOW_ENABLED:
+                self._send_json(503, {"ok": False, "error": "el flujo de tareas está desactivado (NICOS_TASK_FLOW_ENABLED=false)"})
                 return
 
             if self._is_lan() and path in ("/whatsapp/messages", "/director/summary"):
@@ -249,6 +219,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = self._read_json_body()
 
+            if path.startswith("/api/v1/tasks") and not TASK_FLOW_ENABLED:
+                self._send_json(503, {"ok": False, "error": "el flujo de tareas está desactivado (NICOS_TASK_FLOW_ENABLED=false)"})
+                return
+
             if path == "/whatsapp/messages/update":
                 if self._is_lan():
                     self._send_json(403, {"ok": False, "error": "ruta no disponible en la red local"})
@@ -310,14 +284,24 @@ class Handler(BaseHTTPRequestHandler):
                 if not idempotency_key or not raw_text:
                     self._send_json(400, {"ok": False, "error": "body requiere {idempotency_key, raw_text}"})
                     return
+                # Defensa en profundidad: el cliente (entrada-rapida.js) ya bloquea
+                # esto antes de salir de la PC de Marianela — este chequeo repite la
+                # misma heurística acá por si ese chequeo se bypaseó. No es la regla
+                # real (esa es que el extractor de dominio nunca devuelve "clinico").
+                clinico = clinical_guard.detect_clinical_data(raw_text)
+                if clinico["blocked"]:
+                    self._send_json(400, {"ok": False, "error": clinico["reason"]})
+                    return
+                # attachment_path YA NO se acepta del cliente (v0.2.1) — esa ruta
+                # existiría en la PC de quien envía, no en la Mac. Sin upload real
+                # implementado todavía, aceptar una ruta arbitraria no tiene sentido.
                 result = tasks.create_task(
                     idempotency_key, auth["user_id"], auth["device_id"], raw_text,
-                    attachment_path=body.get("attachment_path"),
                 )
-                if result["created"]:
-                    threading.Thread(
-                        target=_process_task_async, args=(result["task"]["task_id"],), daemon=True
-                    ).start()
+                # No se spawnea ningún thread acá — la tarea queda en 'received' y
+                # el worker loop (worker.py, corriendo en su propio thread desde
+                # main()) la recoge en su próximo ciclo (máx. 1s). Esto es lo que
+                # hace que sobreviva a un reinicio del proceso a mitad de camino.
                 self._send_json(200, {"ok": True, **result})
 
             elif path.startswith("/api/v1/tasks/") and path.endswith("/approve"):
@@ -327,11 +311,15 @@ class Handler(BaseHTTPRequestHandler):
             elif path.startswith("/api/v1/tasks/") and path.endswith("/request-info"):
                 self._handle_task_action(path, body, "request-info")
 
+            elif path.startswith("/api/v1/tasks/") and path.endswith("/resolve-execution"):
+                self._handle_resolve_execution(path, body)
+
             elif path.startswith("/api/v1/devices/") and path.endswith("/revoke"):
                 if self._is_lan():
                     self._send_json(403, {"ok": False, "error": "solo disponible localmente"})
                     return
-                device_id = path.split("/")[3]
+                # index 4, no 3: "/api/v1/devices/<id>/revoke".split("/") == ['', 'api', 'v1', 'devices', '<id>', 'revoke']
+                device_id = path.split("/")[4]
                 pairing.revoke_device(device_id)
                 self._send_json(200, {"ok": True})
 
@@ -350,12 +338,17 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(403, {"ok": False, "error": "las aprobaciones se hacen desde la Mac"})
             return
         auth = self._authenticate()
-        task_id = path.split("/")[3]
+        # index 4, no 3: "/api/v1/tasks/<id>/approve".split("/") == ['', 'api', 'v1', 'tasks', '<id>', 'approve']
+        # (bug preexistente, presente desde el tag v0.2-tareas-aprobacion -- corregido acá en v0.2.1-rc1)
+        task_id = path.split("/")[4]
         try:
             if action == "approve":
-                result = tasks.approve_task(task_id, auth["user_id"], body.get("approved_action_hash", ""))
-                # tras aprobar queda en 'ready' -> ejecutar ahora, en background
-                threading.Thread(target=self._execute_after_approval, args=(task_id,), daemon=True).start()
+                result = tasks.approve_task(
+                    task_id, auth["user_id"], body.get("approved_action_hash", ""),
+                    approved_task_revision=body.get("approved_task_revision"),
+                )
+                # tras aprobar queda en 'ready' — el worker loop la recoge sola,
+                # no hace falta spawnear nada acá (ver worker.py).
                 self._send_json(200, {"ok": True, "task": result})
             elif action == "reject":
                 result = tasks.reject_task(task_id, auth["user_id"], body.get("reason", ""))
@@ -370,26 +363,24 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as e:
             self._send_json(404, {"ok": False, "error": str(e)})
 
-    def _execute_after_approval(self, task_id):
-        task = tasks.get_task_dict(task_id)
-        events = tasks.get_task_events(task_id)
-        prepared = None
-        for e in reversed(events):
-            detail = e.get("detail_json")
-            if isinstance(detail, str):
-                try:
-                    detail = json.loads(detail)
-                except json.JSONDecodeError:
-                    detail = {}
-            if detail and "prepared_action" in detail:
-                prepared = detail["prepared_action"]
-                break
-        if prepared is None:
-            tasks.transition(task_id, "needs_review", "system",
-                              detail={"error": "no se encontró la acción preparada en el historial"})
+    def _handle_resolve_execution(self, path, body):
+        """Resolución exclusiva del Director (v0.2.1-rc1, punto 3) para una tarea
+        needs_review causada por una interrupción a mitad de ejecución -- ver
+        tasks.resolve_execution y worker.recover_orphaned_tasks. Mismo chequeo
+        Director-only que aprobar/rechazar (nunca por red)."""
+        if self._is_lan():
+            self._send_json(403, {"ok": False, "error": "la resolución de ejecuciones se hace desde la Mac"})
             return
-        _execute_ready_task(task_id, prepared)
-
+        auth = self._authenticate()
+        task_id = path.split("/")[4]
+        decision = body.get("decision", "")
+        try:
+            result = tasks.resolve_execution(task_id, auth["user_id"], decision, reason=body.get("reason"))
+            self._send_json(200, {"ok": True, "task": result})
+        except tasks.InvalidTransition as e:
+            self._send_json(400, {"ok": False, "error": str(e)})
+        except ValueError as e:
+            self._send_json(404, {"ok": False, "error": str(e)})
 
 def _serve(host, port, is_lan, ready_callback=None):
     server = ThreadingHTTPServer((host, port), Handler)
@@ -402,6 +393,7 @@ def _serve(host, port, is_lan, ready_callback=None):
 
 def main():
     db.run_migrations()
+    db.integrity_check()
 
     local_port_holder = {}
 
@@ -411,11 +403,35 @@ def main():
         print(f"NICOS_SIDECAR_PORT={port}", flush=True)
         sys.stderr.write(f"[sidecar] servidor LOCAL escuchando en http://127.0.0.1:{port}\n")
 
-    lan_thread = threading.Thread(
-        target=_serve, args=("0.0.0.0", LAN_PORT, True), daemon=True
-    )
-    lan_thread.start()
-    sys.stderr.write(f"[sidecar] servidor LAN escuchando en 0.0.0.0:{LAN_PORT}\n")
+    # Worker loop durable — una tarea que quedó a mitad de camino en la corrida
+    # anterior (crash, kill -9, apagón) se recupera acá, antes de aceptar tráfico
+    # nuevo. Corre en su propio thread, separado de los servidores HTTP.
+    worker_thread = threading.Thread(target=worker.run_forever, daemon=True)
+    worker_thread.start()
+
+    # Servidor de red: SOLO si hay una IP de Tailscale configurada Y el daemon está
+    # activo. Nunca cae a 0.0.0.0 como fallback — si Tailscale no está listo, Marianela
+    # simplemente no puede conectar todavía (con un mensaje claro), en vez de exponer
+    # el sidecar a toda la red doméstica en texto plano.
+    if not TAILSCALE_IP:
+        sys.stderr.write(
+            "[sidecar] NICOS_TAILSCALE_IP no está configurada — servidor de red DESHABILITADO. "
+            "Solo el Director (esta Mac, vía localhost) puede usar la app. Para habilitar el "
+            "acceso de Marianela: instalar Tailscale, correr `tailscale ip -4`, y configurar esa "
+            "IP en Ajustes (o la variable de entorno NICOS_TAILSCALE_IP).\n"
+        )
+    elif not _tailscale_running():
+        sys.stderr.write(
+            f"[sidecar] NICOS_TAILSCALE_IP={TAILSCALE_IP} configurada pero `tailscale status` "
+            "no responde — ¿Tailscale está instalado y corriendo en esta Mac? Servidor de red "
+            "DESHABILITADO hasta que se resuelva.\n"
+        )
+    else:
+        lan_thread = threading.Thread(
+            target=_serve, args=(TAILSCALE_IP, LAN_PORT, True), daemon=True
+        )
+        lan_thread.start()
+        sys.stderr.write(f"[sidecar] servidor de red (Tailscale) escuchando en {TAILSCALE_IP}:{LAN_PORT}\n")
 
     try:
         _serve("127.0.0.1", 0, False, ready_callback=_on_local_ready)
