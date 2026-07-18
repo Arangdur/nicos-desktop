@@ -145,7 +145,25 @@ async function toggleTaskDetail(taskId) {
         <button class="secondary btn-resolve" data-id="${taskId}" data-decision="keep_in_review">Mantener en revisión</button>
       </div>
     `;
-  } else if (task.state === 'needs_information' || task.state === 'needs_review') {
+  } else if (task.state === 'needs_information') {
+    // v0.2.1-rc6 -- completar a mano lo que falta (típicamente el dominio,
+    // cuando la IA lo dejó en "unknown") sin ningún llamado nuevo a IA, ver
+    // worker.provide_missing_info.
+    actionButtons = `
+      <div style="margin-top:12px;">
+        <label style="font-size:12px;">Dominio</label>
+        <select class="info-domain-select" data-id="${taskId}">
+          <option value="">-- elegir --</option>
+          <option value="cfo">CFO (personal de Nicolás)</option>
+          <option value="abate">Abate (institucional / consultorio)</option>
+        </select>
+        <div style="margin-top:8px; display:flex; gap:8px;">
+          <button class="primary btn-provide-info" data-id="${taskId}">Completar y reclasificar</button>
+          <button class="secondary btn-reject" data-id="${taskId}">Cancelar tarea</button>
+        </div>
+      </div>
+    `;
+  } else if (task.state === 'needs_review') {
     actionButtons = `
       <div style="margin-top:12px;">
         <button class="secondary btn-reject" data-id="${taskId}">Cancelar tarea</button>
@@ -189,6 +207,25 @@ async function toggleTaskDetail(taskId) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'Rechazada desde la Bandeja de tareas' }),
       });
+      renderTasksList();
+    });
+  });
+  detailEl.querySelectorAll('.btn-provide-info').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const select = detailEl.querySelector(`.info-domain-select[data-id="${btn.dataset.id}"]`);
+      const domain = select ? select.value : '';
+      if (!domain) {
+        alert('Elegí un dominio antes de completar.'); // eslint-disable-line no-alert
+        return;
+      }
+      const res = await fetch(`${tasksApiBase}/api/v1/tasks/${btn.dataset.id}/provide-info`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates: { domain } }),
+      });
+      const result = await res.json();
+      if (!result.ok) {
+        alert(result.error); // eslint-disable-line no-alert
+      }
       renderTasksList();
     });
   });

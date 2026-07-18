@@ -1,0 +1,14 @@
+-- v0.2.1-rc6 -- corrige el bug bloqueante hallado en el smoke test de IA real
+-- (18/7/2026): una tarea con dominio ambiguo ("unknown") o una respuesta
+-- malformada de la IA intentaba una transición inválida (parsing ->
+-- needs_information / needs_review, ninguna permitida desde 'parsing' en
+-- rc1-rc5) y quedaba atascada en 'parsing' para siempre -- el worker la
+-- volvía a tomar cada 1s y reintentaba la extracción real indefinidamente,
+-- sin ningún error visible para el Director.
+--
+-- Esta columna es el respaldo estructural: ninguna tarea puede pasar por
+-- _process_classification() más de MAX_EXTRACTION_ATTEMPTS veces (ver
+-- worker.py), sin importar qué combinación de fallas ocurra. Independiente
+-- del arreglo de la máquina de estados -- es una segunda red de seguridad,
+-- no la única.
+ALTER TABLE tasks ADD COLUMN extraction_attempts INTEGER NOT NULL DEFAULT 0;

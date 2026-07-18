@@ -18,6 +18,18 @@ Aprobación versionada: `action_version_hash` es el hash de la acción propuesta
 en el momento de pedir aprobación. `approve_task` exige que el llamador pase
 el hash que vio — si la tarea se reclasificó después (nuevo hash), el pedido
 de aprobación con el hash viejo se rechaza y hay que volver a mostrarla.
+
+Desde 'parsing' (v0.2.1-rc6): antes de esta versión, solo se podía salir de
+'parsing' hacia 'classified', 'failed' o 'cancelled' -- un dominio ambiguo
+("unknown", un valor legítimo del propio schema de extracción de ai_router.py)
+o una respuesta malformada no tenían ninguna transición válida disponible, así
+que la tarea quedaba atascada en 'parsing' para siempre, reintentando la
+extracción real en cada ciclo del worker (ver worker.py, MAX_EXTRACTION_ATTEMPTS
+para el respaldo estructural adicional). Ahora 'parsing' también puede llegar a
+'needs_information' (dominio ambiguo o campos insuficientes, sin más llamados
+automáticos) y a 'needs_review' (ambos proveedores de IA fallaron, o se agotó
+el presupuesto de reintentos) -- ninguna falla de clasificación puede quedar
+sin una transición explícita y válida.
 """
 import datetime
 import hashlib
@@ -28,10 +40,20 @@ import uuid
 import db
 
 ALLOWED_TRANSITIONS = {
-    "received": {"parsing", "cancelled"},
-    "parsing": {"classified", "failed", "cancelled"},
+    # "needs_review" agregado (v0.2.1-rc6) para que el respaldo de
+    # MAX_EXTRACTION_ATTEMPTS (ver worker.py) nunca pueda fallar: si por
+    # cualquier motivo una tarea sigue en 'received' (nunca llegó siquiera a
+    # 'parsing', ej. crasheó justo al arrancar, repetidas veces) al momento en
+    # que se detecta que superó el límite de intentos, tiene que poder cortar
+    # ahí mismo -- sin depender de haber llegado antes a 'parsing'.
+    "received": {"parsing", "cancelled", "needs_review"},
+    "parsing": {"classified", "failed", "cancelled", "needs_information", "needs_review"},
     "classified": {"needs_information", "pending_approval", "ready", "needs_review", "cancelled"},
-    "needs_information": {"classified", "cancelled"},
+    # "needs_information" -> "needs_information" (v0.2.1-rc6): si Nicolás
+    # aporta información y TODAVÍA no alcanza (ver worker.provide_missing_info),
+    # la tarea se queda en el mismo estado con un nuevo evento explicando qué
+    # sigue faltando -- nunca sin registro de que se lo volvió a mirar.
+    "needs_information": {"classified", "needs_information", "cancelled"},
     "pending_approval": {"ready", "needs_information", "cancelled"},
     "ready": {"executing", "cancelled"},
     "executing": {"completed", "failed", "needs_review"},

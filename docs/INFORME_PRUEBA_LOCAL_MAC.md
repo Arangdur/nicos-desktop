@@ -99,8 +99,65 @@ Verificado tras el fix: "Guardar" con un cambio de IP de Tailscale reinicia el s
 7. **Desconexión de Tailscale**: `tailscale down` -- confirmado con `curl` que el sidecar deja de responder tanto en la IP de Tailscale como en la IP LAN normal de la Mac (`192.168.0.113`) -- no existe ningún fallback a la LAN común. Reconectado con `tailscale up`; el sidecar volvió a responder solo, sin necesidad de reiniciarlo.
 8. **Smoke test de Claude/OpenAI**: pendiente -- requiere que Nicolás cargue sus propias API keys en la instancia Director de prueba, como ya había acordado.
 
-## Pendiente
+## Fase 3: smoke test real de Claude y OpenAI (18/7/2026, sobre v0.2.1-rc5)
 
-- Smoke test real de Claude y OpenAI (texto administrativo ficticio, extracción/clasificación real, cancelación final sin ejecutar nada) -- requiere que Nicolás cargue sus API keys en la instancia Director de prueba.
+Nicolás cargó personalmente sus API keys reales de Anthropic y OpenAI en Ajustes de la instancia Director de prueba (nunca vistas, leídas ni logueadas por Claude en ningún momento -- solo se confirmó el indicador "ya configurada ✓" de la UI). Ejecución financiera bloqueada durante toda la prueba con una guarda temporal en `worker.py` (`NICOS_TEST_DISABLE_EXECUTION=1`): la clasificación corría completa contra las APIs reales, pero `execute_action()` nunca se llamó -- ninguna tarea, en ningún caso, llegó a ejecutarse. Cada tarea se canceló explícitamente después de inspeccionarla.
 
-No se tocó "Acerca de NicOS" (no existe todavía) -- queda para cuando se incorpore en rc5 (o el número de rc que corresponda una vez tageados los fixes de esta fase), junto con cualquier otra corrección pendiente antes del empaquetado.
+### Test 1 -- Claude: éxito completo
+Mensaje: gasto ficticio de librería para Abate, $12.345, 18/07/2026. Extracción correcta (`domain: abate, intent: register_expense, amount: 12345, date: 18/07/2026, concept: Librería`), proveedor confirmado `claude` (forzado vía `provider_matrix.json`), latencia ~6.4s (recibida→clasificada), sin secretos en logs. Tokens: no disponible -- el código no captura uso de tokens en ningún punto (ni para Claude ni OpenAI), señalado como gap menor. Cancelada antes de cualquier ejecución.
+
+### Test 2 -- OpenAI: cuenta sin crédito, fallback automático a Claude
+La extracción con OpenAI falló con `429 insufficient_quota` (cuenta de OpenAI sin billing cargado -- no es un bug de la app). El sistema cayó automáticamente a Claude (`fallback_allowed_for_simple_tasks: true`) y completó la extracción igual (`domain: cfo, intent: register_income, amount: 23456, date: 18/07/2026, concept: Devolución de una compra`). Se agregó un log de diagnóstico temporal en `ai_router.py` para capturar el error real de OpenAI sin exponer la key; confirmado y revertido después.
+
+### Casos negativos
+
+**1. Clave inválida**: probado a nivel de código (env var sintética inválida en un subproceso aislado, nunca la key real de Nicolás). Resultado limpio: `401 authentication_error`, tarea → `failed`, sin crash del worker, sin secretos en el mensaje de error.
+
+**2. Respuesta malformada -- reveló un bug real y severo, no relacionado con IA malformada en sí**: al simular distintas formas de dato malformado (dict vacío, `data` no-dict, `amount` con tipo incorrecto), se encontró que **cualquier tarea cuyo dominio resulte ambiguo o fuera de alcance (`domain: "unknown"`, un valor legítimo del propio schema de extracción) queda atascada para siempre en el estado `parsing`**, reintentando cada 1 segundo con llamadas reales a la IA, sin ningún mensaje de error visible para el Director. Confirmado también con una llamada real (no simulada): el mensaje "Cambié la posición del trading bot en BTC..." (deliberadamente fuera de alcance) reprodujo el mismo bug con Claude real.
+
+Causa raíz en `worker.py::_process_classification`: cuando `classify_request()` devuelve `None` (dominio ambiguo), el código intenta `tasks.transition(task_id, "needs_information", ...)` estando la tarea todavía en estado `parsing` -- pero `ALLOWED_TRANSITIONS["parsing"]` solo permite `{"classified", "failed", "cancelled"}`, nunca `needs_information`. Esto dispara `InvalidTransition`, capturada por el `except` externo, que intenta la red de seguridad `needs_review` -- **tampoco alcanzable desde `parsing`** -- y esa segunda excepción se descarta en silencio (`except Exception: pass`). La tarea queda huérfana en `parsing`, que sigue en `QUEUED_STATES`, así que el worker la vuelve a tomar y reintenta la extracción real cada segundo, indefinidamente, quemando llamadas a la API sin que nadie se entere.
+
+Las 5 tareas afectadas (3 simuladas + 1 real + la del caso 3 de abajo) se cancelaron manualmente para detener el loop en cuanto se detectó.
+
+**3. Caída de proveedor / alcance del fallback**: con OpenAI caído por cuota, se probó también con un mensaje que hubiera requerido aprobación (`"Autorizar un pago nuevo..."`, intent `new_financial_action`, no un `logging_intent`). El fallback a Claude se activó igual que en el test 2 -- confirma que el fallback de `extract()` **no está realmente condicionado a que la tarea sea "verde"**, como sugiere el nombre `fallback_allowed_for_simple_tasks`: ocurre siempre que el proveedor primario falla, sin importar el riesgo final de la tarea, porque el riesgo recién se calcula DESPUÉS de que la extracción tuvo éxito -- estructuralmente no puede conocerse antes. Ese intento particular también cayó en el bug del caso 2 (dominio ambiguo), así que la prueba de "extracción totalmente fallida → needs_review" quedó cubierta por el caso 1 (clave inválida): el resultado real es `failed`, nunca `needs_review`, contradiciendo la expectativa de Nicolás/ChatGPT.
+
+### Cierre de la fase
+
+- Guarda temporal de `worker.py` y diagnóstico temporal de `ai_router.py` revertidos.
+- Suite completo (16/16) vuelto a correr: sin regresiones.
+- `git diff` vacío confirmado.
+- `HEAD` confirmado igual al commit de `v0.2.1-rc5` (`b94a11310b7207f2f43901657e6729b2d4eafb02`).
+- Ningún archivo productivo modificado; ninguna acción financiera ejecutada en ningún momento de la fase.
+
+## Fase 4: corrección del bug bloqueante (v0.2.1-rc6, 18/7/2026)
+
+Nicolás decidió corregir el bug del caso 2 de inmediato en vez de dejarlo solo documentado ("es un bug bloqueante para release"), con una especificación detallada de 8 requisitos. Resumen de lo que cambió:
+
+**1. Máquina de estados (`tasks.py`)**: `ALLOWED_TRANSITIONS["parsing"]` ahora permite `needs_information` y `needs_review` (además de `classified`/`failed`/`cancelled`). También se agregó `needs_review` a `ALLOWED_TRANSITIONS["received"]` -- hallado por el propio test del límite de intentos: si una tarea nunca llega a `parsing` (crash muy temprano, repetido), el respaldo de intentos necesitaba poder cortar desde ahí también. Y `needs_information` se agregó a su propio conjunto de destinos (self-loop), para el caso "Nicolás aportó info pero todavía no alcanza".
+
+**2. Resiliencia de extracción (`ai_router.py`, reescrito)**: `extract()` ahora tiene un presupuesto duro de **2 llamadas HTTP reales como máximo** por invocación, clasifica el tipo de falla (`auth_error` vs `transient_error` vs `malformed`, por nombre de clase de excepción -- Anthropic y OpenAI exponen los mismos nombres) y valida la forma estructural de cualquier respuesta antes de aceptarla como éxito. Política: error transitorio o de cuota → un intento con el alternativo; malformado → un intento con el alternativo (mismo presupuesto); auth/config inválida → error visible, sin probar el alternativo (para no enmascarar una key mal configurada). `domain: "unknown"` ya NO es un fallo de extracción -- es un resultado `'success'` estructuralmente válido, y la ambigüedad de negocio se resuelve después, donde siempre debió resolverse (`centro_mando_adapter.classify_request`).
+
+**3. `worker.py` reescrito**: `_process_classification` ahora maneja explícitamente los 3 outcomes de `extract()` más 2 casos nuevos (dominio ambiguo, campos insuficientes vía `REQUIRED_FIELDS_CFO`) -- cada uno con una transición válida, un `task_event` con detalle, y un `error_message` legible. Se agregó `extraction_attempts` (persistido en la tarea, migración `004_extraction_resilience.sql`) con `MAX_EXTRACTION_ATTEMPTS = 2`: ninguna tarea puede pasar por clasificación más de 2 veces, verificado ANTES de llamar a cualquier proveedor -- respaldo estructural independiente del arreglo de la máquina de estados. Nueva función `provide_missing_info()`: el Director completa a mano el dato faltante (típicamente el dominio) sin ningún llamado nuevo a IA, reevaluando de forma 100% determinística.
+
+**4. Renombrado (`provider_matrix.json`)**: `fallback_allowed_for_simple_tasks` → `fallback_on_primary_failure`, con una nota explicando por qué el nombre viejo prometía algo que el código nunca podía cumplir (el riesgo se calcula después de la extracción, nunca antes).
+
+**5. UI (`tasks-tab.js`)**: una tarea `needs_information` ahora muestra un selector de dominio + botón "Completar y reclasificar", además de "Cancelar tarea". Nueva ruta `POST /api/v1/tasks/:id/provide-info` (Director-only, mismo patrón que aprobar/rechazar).
+
+**6. Hallazgo adicional durante la verificación en vivo**: `provide_missing_info()` no tenía su propio manejo de excepciones -- si `prepare_action()` rechazaba la combinación dominio+intent (ej. `intent: "other"`, todavía no soportado para `cfo`), la tarea quedaba parada en `classified` sin transición final. Corregido envolviendo esa cola en su propio try/except dentro de `_finish_classification()`, con test de regresión agregado (`test_completar_con_combinacion_no_preparable_termina_en_needs_review_no_en_classified`).
+
+### Pruebas nuevas (9 archivos, todos en `sidecar/tests/`)
+
+`test_extraction_domain_unknown.py`, `test_extraction_malformed_json.py`, `test_extraction_both_providers_fail.py`, `test_extraction_fallback_success.py`, `test_extraction_attempt_limit.py`, `test_worker_restart_no_reactivated_loop.py`, `test_needs_information_completion.py`, `test_no_extra_calls_after_terminal_state.py`, y `test_regression_rc5_parsing_stuck_bug.py` (revierte deliberadamente `ALLOWED_TRANSITIONS["parsing"]` al conjunto viejo dentro del propio test y confirma que el bug original reaparece -- si alguien revierte el fix de verdad en el futuro, este archivo empieza a fallar solo). Todas usan clientes falsos de Anthropic/OpenAI (`_fake_ai_clients.py`) -- ninguna pega a una API real.
+
+Durante la escritura de los tests se encontró y corrigió un segundo gap real (no el bug original): `ALLOWED_TRANSITIONS["received"]` no incluía `needs_review`, así que el respaldo de `MAX_EXTRACTION_ATTEMPTS` podía fallar si la tarea nunca había llegado a `parsing`. Corregido antes de seguir.
+
+### Verificación
+
+- Suite completo: **25/25** (16 previos + 9 nuevos), sin regresiones, incluye `test_risk_policy_characterization.py` (los 10 casos reales) y `test_integration_dry_run.py` intactos.
+- Smoke test real (no simulado) contra la instancia Director de prueba, con las API keys reales de Nicolás ya cargadas: se reenvió el mensaje exacto que reprodujo el bug original ("Cambié la posición del trading bot en BTC...") -- resultado: `needs_information` en el primer intento, `extraction_attempts: 1`, mensaje de error claro. Ventana de observación de 20 segundos sin ninguna llamada adicional (solo polling normal de la UI).
+- Probado en vivo el flujo completo de `provide_missing_info` vía la ruta HTTP real: un mensaje genuinamente ambiguo ("Pagué $7.500 de insumos de librería, no sé si va para Abate o para mí") se completó en dos pasos (dominio, después fecha faltante) hasta llegar a `ready` / risk `simple` -- confirmando también que el dominio `abate` nunca se auto-ejecuta (diseño preexistente, sin cambios), terminando en `needs_review` sin tocar ningún archivo real.
+- `git diff` vacío confirmado antes de este commit; ningún archivo productivo tocado; ninguna acción financiera ejecutada en ningún momento de la fase.
+
+## Cierre general (rc5 + rc6)
+
+No se tocó "Acerca de NicOS" (no existe todavía) -- queda para `v0.2.1-rc7`, en el momento del empaquetado, junto con cualquier otra corrección pendiente. `OpenAI 429 insufficient_quota` sigue siendo un problema de cuota/configuración de la cuenta de Nicolás, no un bug de NicOS -- documentado como tal en ambas fases.

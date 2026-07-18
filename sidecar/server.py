@@ -314,6 +314,9 @@ class Handler(BaseHTTPRequestHandler):
             elif path.startswith("/api/v1/tasks/") and path.endswith("/resolve-execution"):
                 self._handle_resolve_execution(path, body)
 
+            elif path.startswith("/api/v1/tasks/") and path.endswith("/provide-info"):
+                self._handle_provide_info(path, body)
+
             elif path.startswith("/api/v1/devices/") and path.endswith("/revoke"):
                 if self._is_lan():
                     self._send_json(403, {"ok": False, "error": "solo disponible localmente"})
@@ -376,6 +379,25 @@ class Handler(BaseHTTPRequestHandler):
         decision = body.get("decision", "")
         try:
             result = tasks.resolve_execution(task_id, auth["user_id"], decision, reason=body.get("reason"))
+            self._send_json(200, {"ok": True, "task": result})
+        except tasks.InvalidTransition as e:
+            self._send_json(400, {"ok": False, "error": str(e)})
+        except ValueError as e:
+            self._send_json(404, {"ok": False, "error": str(e)})
+
+    def _handle_provide_info(self, path, body):
+        """v0.2.1-rc6 -- el Director completa a mano lo que falta en una tarea
+        'needs_information' (típicamente el dominio, cuando la IA lo dejó en
+        "unknown"). CERO llamados a un proveedor de IA (ver
+        worker.provide_missing_info) -- Director-only, igual que aprobar/
+        rechazar/resolver, nunca por red."""
+        if self._is_lan():
+            self._send_json(403, {"ok": False, "error": "completar información se hace desde la Mac"})
+            return
+        auth = self._authenticate()
+        task_id = path.split("/")[4]
+        try:
+            result = worker.provide_missing_info(task_id, auth["user_id"], body.get("updates", {}))
             self._send_json(200, {"ok": True, "task": result})
         except tasks.InvalidTransition as e:
             self._send_json(400, {"ok": False, "error": str(e)})

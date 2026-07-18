@@ -62,7 +62,7 @@ def get_provider_matrix() -> dict:
         with open(PROVIDER_MATRIX_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"version": 0, "rules": {}, "fallback_allowed_for_simple_tasks": True}
+        return {"version": 0, "rules": {}, "fallback_on_primary_failure": True}
 
 
 def get_provider_for(task_type: str, default: str = "claude") -> str:
@@ -194,63 +194,176 @@ def ask_director(question: str, context: dict, history: list = None, brain: str 
     return _ask_claude(question, context, history)
 
 
-def _extract_openai(raw_text: str) -> dict:
-    client = _get_openai_client()
-    if client is None:
-        return {"ok": False, "error": _openai_error, "provider": "openai"}
-    try:
-        resp = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-5"),
-            messages=[
-                {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
-                {"role": "user", "content": raw_text},
-            ],
-            response_format={"type": "json_schema", "json_schema": EXTRACTION_JSON_SCHEMA},
-        )
-        data = json.loads(resp.choices[0].message.content)
-        return {"ok": True, "data": data, "provider": "openai"}
-    except Exception as e:
-        return {"ok": False, "error": f"Error extrayendo con OpenAI: {e}", "provider": "openai"}
+# v0.2.1-rc6 — resiliencia de extracción. Antes de esto, `extract()` hacía a
+# lo sumo un fallback ad-hoc (openai -> claude) solo si `ok` era False, sin
+# distinguir POR QUÉ falló ni validar la FORMA de una respuesta que sí vino
+# marcada como exitosa. Eso permitía dos huecos reales, encontrados en el
+# smoke test del 18/7/2026:
+#   1. Una respuesta con `domain: "unknown"` (un valor legítimo del propio
+#      schema) se trataba como éxito -- el llamador (`worker.py`) intentaba
+#      una transición de estado que no existía, y la tarea quedaba atascada
+#      reintentando la extracción real cada 1s, para siempre.
+#   2. Nada bloqueaba una cadena de reintentos ilimitada si la respuesta
+#      llegaba estructuralmente rota (JSON inválido, faltaban claves).
+# Ahora `extract()` nunca hace más de 2 llamadas HTTP reales en total, siempre
+# devuelve un `outcome` explícito, y clasifica el tipo de falla para decidir
+# si vale la pena un segundo intento con el proveedor alternativo.
+
+_AUTH_ERROR_TYPES = ("AuthenticationError", "PermissionDeniedError")
+
+_REQUIRED_EXTRACTION_KEYS = set(EXTRACTION_JSON_SCHEMA["schema"]["required"])
+_VALID_DOMAINS = set(EXTRACTION_JSON_SCHEMA["schema"]["properties"]["domain"]["enum"])
+_VALID_INTENTS = set(EXTRACTION_JSON_SCHEMA["schema"]["properties"]["intent"]["enum"])
 
 
-def _extract_claude(raw_text: str) -> dict:
-    client = _get_claude_client()
-    if client is None:
-        return {"ok": False, "error": _claude_error, "provider": "claude"}
-    try:
-        resp = client.messages.create(
-            model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5"),
-            max_tokens=500,
-            system=EXTRACTION_SYSTEM_PROMPT,
-            tools=[{
-                "name": "extracted_task",
-                "description": "Datos estructurados extraídos del pedido en texto libre.",
-                "input_schema": EXTRACTION_JSON_SCHEMA["schema"],
-            }],
-            tool_choice={"type": "tool", "name": "extracted_task"},
-            messages=[{"role": "user", "content": raw_text}],
-        )
-        tool_block = next(b for b in resp.content if b.type == "tool_use")
-        return {"ok": True, "data": tool_block.input, "provider": "claude"}
-    except Exception as e:
-        return {"ok": False, "error": f"Error extrayendo con Claude: {e}", "provider": "claude"}
+def _classify_exception(exc) -> str:
+    """'auth' | 'transient' — Anthropic y OpenAI exponen nombres de excepción
+    equivalentes (AuthenticationError, RateLimitError, APIConnectionError,
+    etc.), así que alcanza con el nombre de la clase, sin importar de qué
+    librería vino. 'auth': la key/config de ESE proveedor está mal — no tiene
+    sentido reintentar CON EL MISMO proveedor, pero tampoco se enmascara
+    probando el alternativo (ver política en `extract()`). Cualquier otra
+    excepción (cuota, rate limit, timeout, 5xx del lado del proveedor, o algo
+    no previsto) se trata como 'transient' — vale la pena una sola vez con el
+    alternativo."""
+    if type(exc).__name__ in _AUTH_ERROR_TYPES:
+        return "auth"
+    return "transient"
+
+
+def _validate_extraction_shape(data):
+    """None si `data` tiene la forma que pedimos (dict, todas las claves
+    requeridas presentes, domain/intent dentro del enum, amount numérico o
+    null) — si no, un string describiendo qué está mal. Deliberadamente NO
+    evalúa si el dominio está soportado por el negocio (cfo/abate) — eso es
+    ambigüedad de dominio, no una respuesta malformada, y lo decide después
+    `centro_mando_adapter.classify_request()`. Acá solo se valida que lo que
+    volvió el proveedor tenga la forma que el schema pidió."""
+    if not isinstance(data, dict):
+        return f"la respuesta no es un objeto JSON (vino {type(data).__name__})"
+    missing = _REQUIRED_EXTRACTION_KEYS - set(data.keys())
+    if missing:
+        return f"faltan campos requeridos: {', '.join(sorted(missing))}"
+    if data.get("domain") not in _VALID_DOMAINS:
+        return f"'domain' fuera del rango esperado: {data.get('domain')!r}"
+    if data.get("intent") not in _VALID_INTENTS:
+        return f"'intent' fuera del rango esperado: {data.get('intent')!r}"
+    amount = data.get("amount")
+    if amount is not None and not isinstance(amount, (int, float)):
+        return f"'amount' no es numérico: {amount!r}"
+    return None
+
+
+def _try_extract(provider_name: str, raw_text: str) -> dict:
+    """UN único intento con UN proveedor — nunca reintenta internamente (eso
+    lo orquesta `extract()`, que es quien controla el presupuesto total).
+    status: 'success' | 'malformed' | 'auth_error' | 'transient_error'."""
+    if provider_name == "openai":
+        client = _get_openai_client()
+        if client is None:
+            return {"status": "auth_error", "provider": "openai", "error": _openai_error}
+        try:
+            resp = client.chat.completions.create(
+                model=os.getenv("OPENAI_MODEL", "gpt-5"),
+                messages=[
+                    {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+                    {"role": "user", "content": raw_text},
+                ],
+                response_format={"type": "json_schema", "json_schema": EXTRACTION_JSON_SCHEMA},
+            )
+            raw_content = resp.choices[0].message.content
+            try:
+                data = json.loads(raw_content)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"status": "malformed", "provider": "openai", "error": f"JSON inválido: {e}"}
+        except Exception as e:
+            status = "auth_error" if _classify_exception(e) == "auth" else "transient_error"
+            return {"status": status, "provider": "openai", "error": f"{type(e).__name__}: {e}"}
+    else:
+        client = _get_claude_client()
+        if client is None:
+            return {"status": "auth_error", "provider": "claude", "error": _claude_error}
+        try:
+            resp = client.messages.create(
+                model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5"),
+                max_tokens=500,
+                system=EXTRACTION_SYSTEM_PROMPT,
+                tools=[{
+                    "name": "extracted_task",
+                    "description": "Datos estructurados extraídos del pedido en texto libre.",
+                    "input_schema": EXTRACTION_JSON_SCHEMA["schema"],
+                }],
+                tool_choice={"type": "tool", "name": "extracted_task"},
+                messages=[{"role": "user", "content": raw_text}],
+            )
+            tool_block = next((b for b in resp.content if b.type == "tool_use"), None)
+            if tool_block is None:
+                return {"status": "malformed", "provider": "claude", "error": "la respuesta no incluyó el tool_use esperado"}
+            data = tool_block.input
+        except Exception as e:
+            status = "auth_error" if _classify_exception(e) == "auth" else "transient_error"
+            return {"status": status, "provider": "claude", "error": f"{type(e).__name__}: {e}"}
+
+    shape_error = _validate_extraction_shape(data)
+    if shape_error:
+        return {"status": "malformed", "provider": provider_name, "error": shape_error}
+    return {"status": "success", "provider": provider_name, "data": data}
 
 
 def extract(raw_text: str, provider: str = None) -> dict:
     """Convierte texto libre en {domain, intent, amount, date, concept, evidence}.
-    El proveedor se elige por la matriz versionada (provider_matrix.json) salvo
-    que se pase explícitamente. Nunca decide riesgo — eso es de centro_mando_adapter.py."""
+    El proveedor primario se elige por la matriz versionada (provider_matrix.json)
+    salvo que se pase explícitamente. Nunca decide riesgo ni si un dominio está
+    soportado por el negocio — eso es 100% de `centro_mando_adapter.py`.
+
+    Presupuesto DURO: nunca más de 2 llamadas HTTP reales por invocación, sin
+    importar qué combinación de fallas ocurra.
+
+    outcome devuelto:
+      - 'success': respuesta con forma válida (schema-conformant) -- 'data',
+        'provider' (y 'fell_back_from' si hizo falta el alternativo). El
+        `domain` puede perfectamente ser "unknown" -- sigue siendo 'success'
+        acá, la ambigüedad de negocio la resuelve el llamador.
+      - 'auth_error': key/config inválida -- 'error', 'provider'. Nunca
+        intenta el alternativo (evita enmascarar un proveedor mal configurado).
+      - 'both_failed': se agotó el presupuesto sin una respuesta válida --
+        'error' (combina el detalle de ambos intentos), 'attempts'.
+
+    Política:
+      - error transitorio o de cuota en el primario -> UN intento con el
+        alternativo.
+      - respuesta malformada/fuera de esquema del primario -> UN intento con
+        el alternativo (mismo presupuesto -- es el "reintento controlado").
+      - autenticación/configuración inválida -> error visible, sin intentar
+        el alternativo.
+    """
     provider = provider or get_provider_for("extract_task", default="openai")
-    if provider == "openai":
-        result = _extract_openai(raw_text)
-        if not result["ok"] and get_provider_matrix().get("fallback_allowed_for_simple_tasks", True):
-            # la extracción en sí no es una acción riesgosa (no ejecuta nada) — el
-            # fallback acá es seguro; lo que nunca hace fallback es execute_action.
-            fallback = _extract_claude(raw_text)
-            fallback["fell_back_from"] = "openai"
-            return fallback
-        return result
-    return _extract_claude(raw_text)
+    alternate = "claude" if provider == "openai" else "openai"
+
+    attempts = []
+    first = _try_extract(provider, raw_text)
+    attempts.append(first)
+
+    if first["status"] == "success":
+        return {"outcome": "success", "data": first["data"], "provider": provider, "attempts": attempts}
+
+    if first["status"] == "auth_error":
+        return {"outcome": "auth_error", "provider": provider, "error": first["error"], "attempts": attempts}
+
+    if not get_provider_matrix().get("fallback_on_primary_failure", True):
+        return {"outcome": "both_failed", "error": first["error"], "attempts": attempts}
+
+    second = _try_extract(alternate, raw_text)
+    attempts.append(second)
+
+    if second["status"] == "success":
+        return {
+            "outcome": "success", "data": second["data"], "provider": alternate,
+            "fell_back_from": provider, "attempts": attempts,
+        }
+
+    combined_error = f"{provider}: {first['error']} | {alternate}: {second['error']}"
+    return {"outcome": "both_failed", "error": combined_error, "attempts": attempts}
 
 
 def review(candidate_text: str, context: dict, provider: str = None) -> dict:

@@ -1,10 +1,11 @@
 {
-  "version": 1,
+  "version": 2,
   "_nota": "Qué proveedor de IA usa cada tipo de tarea. Editable sin tocar código — el sidecar relee este archivo en cada consulta. El proveedor NUNCA decide riesgo ni permisos, solo ejecuta extracción/redacción/revisión (ver centro_mando_adapter.py, que es 100% determinístico).",
   "rules": {
     "extract_task": "openai",
     "director_chat": "claude",
     "review": "claude"
   },
-  "fallback_allowed_for_simple_tasks": true
+  "fallback_on_primary_failure": true,
+  "_nota_fallback": "v0.2.1-rc6: renombrado desde 'fallback_allowed_for_simple_tasks' -- ese nombre prometía algo que el código nunca cumplió. El riesgo (simple/approval_required) recién se calcula DESPUÉS de que la extracción tuvo éxito, así que en el momento de decidir si hacer fallback no hay forma de saber si la tarea es 'verde'. Este flag controla únicamente si, cuando el proveedor primario falla (error transitorio/cuota) o devuelve algo malformado, se intenta UNA vez con el proveedor alternativo -- nunca más de 2 llamadas totales por ciclo de extracción, sin importar el resultado."
 }
