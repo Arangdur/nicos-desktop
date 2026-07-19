@@ -26,8 +26,13 @@ document.querySelectorAll('[data-tab]').forEach((btn) => {
     switchTab(btn.dataset.tab);
     if (btn.dataset.tab === 'entrada') loadMisTareas();
     if (btn.dataset.tab === 'mensajes') loadMensajes();
+    if (btn.dataset.tab === 'acerca-de') loadAcercaDe();
   });
 });
+
+function loadAcercaDe() {
+  renderAboutPanel(document.getElementById('tab-acerca-de'));
+}
 
 function estadoTagClass(estado) {
   const e = (estado || '').toLowerCase();

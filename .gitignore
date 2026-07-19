@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# Generado por scripts/generate-build-info.js en cada compilación -- nunca a mano.
+build/build-info.json
 sidecar/.venv/
 sidecar/build/
 sidecar/dist/

@@ -34,6 +34,23 @@ mkdir -p "$OUT_DIR"
 
 echo "Exportando a: $OUT_DIR"
 
+# --- Metadata de build (v0.2.1-rc7) -- busca primero en el checkout de
+# desarrollo (build/build-info.json, generado por "npm run dist:mac"), y si
+# no está, en la app instalada real (Contents/Resources/build-info.json,
+# donde queda como extraResource plano, fuera del asar). Con qué código
+# corre exactamente esto -- útil para saber si un problema reportado
+# corresponde a la versión esperada antes de perder tiempo diagnosticando. ---
+{
+  echo "=== build-info ==="
+  if [ -f "$SCRIPT_DIR/build/build-info.json" ]; then
+    cat "$SCRIPT_DIR/build/build-info.json"
+  elif [ -f "/Applications/NicOS Desktop.app/Contents/Resources/build-info.json" ]; then
+    cat "/Applications/NicOS Desktop.app/Contents/Resources/build-info.json"
+  else
+    echo "(no se encontró build-info.json -- ¿se corrió 'npm run dist:mac' o está instalada la app?)"
+  fi
+} > "$OUT_DIR/build_info.txt"
+
 # --- Tailscale ---
 {
   echo "=== tailscale status ==="

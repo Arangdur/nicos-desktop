@@ -33,11 +33,26 @@ $tailscaleOut += "=== tailscale ip -4 ==="
 try { $tailscaleOut += (tailscale ip -4 2>&1 | Out-String) } catch { $tailscaleOut += "(sin IP asignada)" }
 $tailscaleOut | Out-File "$outDir\tailscale.txt"
 
-# --- Versión de la app ---
+# --- Versión de la app (checkout de desarrollo, si corresponde) ---
 $pkgPath = Join-Path (Split-Path $PSScriptRoot -Parent) "package.json"
 if (Test-Path $pkgPath) {
     $pkg = Get-Content $pkgPath -Raw | ConvertFrom-Json
     "version: $($pkg.version)" | Out-File "$outDir\version.txt"
+}
+
+# --- Metadata de build (v0.2.1-rc7) -- busca primero en el checkout de
+# desarrollo (build\build-info.json), y si no está, en la instalación real
+# (resources\build-info.json, extraResource plano fuera del asar). Con qué
+# código corre exactamente esta PC -- clave para descartar que un problema
+# reportado sea, en realidad, una instalación vieja. ---
+$devBuildInfo = Join-Path (Split-Path $PSScriptRoot -Parent) "build\build-info.json"
+$installedBuildInfo = "$env:LOCALAPPDATA\Programs\NicOS Desktop\resources\build-info.json"
+if (Test-Path $devBuildInfo) {
+    Copy-Item $devBuildInfo "$outDir\build_info.json"
+} elseif (Test-Path $installedBuildInfo) {
+    Copy-Item $installedBuildInfo "$outDir\build_info.json"
+} else {
+    "(no se encontró build-info.json -- ¿está instalada la app?)" | Out-File "$outDir\build_info.txt"
 }
 
 # --- Configuración local de Operativa: solo QUÉ CAMPOS EXISTEN y su estado,

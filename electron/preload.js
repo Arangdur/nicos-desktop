@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('nicos', {
   saveSettings: (update) => ipcRenderer.invoke('nicos:save-settings', update),
   setRole: (role) => ipcRenderer.invoke('nicos:set-role', role),
   getSidecarPort: () => ipcRenderer.invoke('nicos:get-sidecar-port'),
+  getAboutInfo: () => ipcRenderer.invoke('nicos:get-about-info'),
 
   operativaPair: (host, port, code, deviceName) =>
     ipcRenderer.invoke('nicos:operativa-pair', { host, port, code, deviceName }),

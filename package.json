@@ -1,6 +1,6 @@
 {
   "name": "nicos-desktop",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "NicOS Desktop — consola de Nicolás (Director) y Marianela (Operativa), con Claude y OpenAI.",
   "main": "electron/main.js",
   "author": "Nicolás Buso",
@@ -8,8 +8,9 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "dist:mac": "electron-builder --mac",
-    "dist:win": "electron-builder --win"
+    "build-info": "node scripts/generate-build-info.js",
+    "dist:mac": "npm run build-info && electron-builder --mac",
+    "dist:win": "npm run build-info && electron-builder --win"
   },
   "devDependencies": {
     "electron": "^31.0.0",
@@ -21,7 +22,6 @@
     "files": [
       "electron/**/*",
       "renderer/**/*",
-      "build/**/*",
       "package.json"
     ],
     "mac": {
@@ -35,6 +35,10 @@
         {
           "from": "policies",
           "to": "policies"
+        },
+        {
+          "from": "build/build-info.json",
+          "to": "build-info.json"
         }
       ]
     },
@@ -48,6 +52,10 @@
         {
           "from": "policies",
           "to": "policies"
+        },
+        {
+          "from": "build/build-info.json",
+          "to": "build-info.json"
         }
       ]
     },

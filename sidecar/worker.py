@@ -337,6 +337,17 @@ def provide_missing_info(task_id: str, actor: str, updates: dict):
         raise tasks.InvalidTransition(
             f"provide_missing_info solo aplica a tareas en 'needs_information' (esta está en '{task['state']}')."
         )
+    # v0.2.1-rc7: validación explícita del dominio ANTES de tocar la tarea --
+    # no alcanza con que classify_request() termine rechazando un valor
+    # inesperado más abajo (eso ya pasaba, pero de forma implícita); acá se
+    # rechaza de entrada cualquier cosa que no sea uno de los dominios que el
+    # negocio soporta (cfo/abate -- ver policies/risk_policy.yaml), sin
+    # escribir nada en la tarea ni en el historial.
+    if "domain" in updates and updates["domain"] not in centro_mando_adapter.SUPPORTED_DOMAINS:
+        raise ValueError(
+            f"Dominio no permitido: {updates['domain']!r}. "
+            f"Valores válidos: {sorted(centro_mando_adapter.SUPPORTED_DOMAINS)}."
+        )
 
     extracted = task.get("extracted_json") or {}
     if isinstance(extracted, str):

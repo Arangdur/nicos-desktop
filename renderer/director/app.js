@@ -32,8 +32,13 @@ document.querySelectorAll('[data-tab]').forEach((btn) => {
     switchTab(btn.dataset.tab);
     if (btn.dataset.tab === 'tareas') renderTasksList();
     if (btn.dataset.tab === 'ajustes') loadAjustes();
+    if (btn.dataset.tab === 'acerca-de') loadAcercaDe();
   });
 });
+
+function loadAcercaDe() {
+  renderAboutPanel(document.getElementById('tab-acerca-de'));
+}
 
 async function loadResumen() {
   const el = document.getElementById('tab-resumen');

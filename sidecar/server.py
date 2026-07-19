@@ -158,7 +158,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(503, {"ok": False, "error": "el flujo de tareas está desactivado (NICOS_TASK_FLOW_ENABLED=false)"})
                 return
 
-            if self._is_lan() and path in ("/whatsapp/messages", "/director/summary"):
+            if self._is_lan() and path in ("/whatsapp/messages", "/director/summary", "/api/v1/system/status"):
                 self._send_json(403, {"ok": False, "error": "ruta no disponible en la red local"})
                 return
 
@@ -167,6 +167,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True, "messages": messages})
             elif path == "/director/summary":
                 self._send_json(200, {"ok": True, "summary": _director_summary()})
+            elif path == "/api/v1/system/status":
+                # v0.2.1-rc7 -- para "Acerca de NicOS". Deliberadamente NO
+                # incluye la IP de Tailscale, el puerto, ni nada del
+                # dispositivo -- solo booleanos/versiones, nada que identifique
+                # la red ni permita ubicarla.
+                self._send_json(200, {
+                    "ok": True,
+                    "core_running": True,
+                    "tailscale_configured": bool(TAILSCALE_IP),
+                    "tailscale_connected": _tailscale_running(),
+                    "policy_version": centro_mando_adapter.POLICY_VERSION,
+                    "policy_hash": centro_mando_adapter.POLICY_HASH,
+                    "python_version": sys.version.split()[0],
+                })
             elif path == "/api/v1/tasks":
                 auth = self._authenticate()
                 if auth is None:

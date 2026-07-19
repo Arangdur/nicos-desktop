@@ -158,6 +158,59 @@ Durante la escritura de los tests se encontró y corrigió un segundo gap real (
 - Probado en vivo el flujo completo de `provide_missing_info` vía la ruta HTTP real: un mensaje genuinamente ambiguo ("Pagué $7.500 de insumos de librería, no sé si va para Abate o para mí") se completó en dos pasos (dominio, después fecha faltante) hasta llegar a `ready` / risk `simple` -- confirmando también que el dominio `abate` nunca se auto-ejecuta (diseño preexistente, sin cambios), terminando en `needs_review` sin tocar ningún archivo real.
 - `git diff` vacío confirmado antes de este commit; ningún archivo productivo tocado; ninguna acción financiera ejecutada en ningún momento de la fase.
 
-## Cierre general (rc5 + rc6)
+## Fase 5: "Acerca de NicOS", build-info.json, empaquetado real (v0.2.1-rc7, 18-19/7/2026)
 
-No se tocó "Acerca de NicOS" (no existe todavía) -- queda para `v0.2.1-rc7`, en el momento del empaquetado, junto con cualquier otra corrección pendiente. `OpenAI 429 insufficient_quota` sigue siendo un problema de cuota/configuración de la cuenta de Nicolás, no un bug de NicOS -- documentado como tal en ambas fases.
+Alcance exclusivo pedido por Nicolás -- sin lógica operativa nueva: pantalla "Acerca de", `build-info.json`, esa metadata en los reportes sanitizados, generar el `.dmg` de Mac, instalarlo como aplicación real y repetir los flujos críticos. Más los 4 tests pendientes de `provide_missing_info` (task_revision, invalidación de aprobación, allowlist de dominio, actor+auditoría), pedidos antes de cerrar.
+
+### `provide_missing_info` -- los 4 tests pedidos
+
+Agregados a `test_needs_information_completion.py` (10 tests en total ahora, todo el archivo sigue en verde):
+- **Incrementa `task_revision`**: confirmado, +1 en cada reclasificación.
+- **Invalida aprobaciones anteriores**: se armó el escenario completo -- tarea a `pending_approval`, `request_info` la vuelve a `needs_information`, se completa de nuevo (sube la revisión), y un intento de `approve_task` con el hash/revisión VIEJOS levanta `StaleApproval` (mecanismo ya existente en `approve_task`, disparado acá por primera vez desde este flujo). El hash puede coincidir si el contenido no cambió -- lo que garantiza la invalidación siempre es la revisión, no el hash por sí solo.
+- **Acepta únicamente dominios permitidos**: se agregó validación explícita al inicio de `provide_missing_info` (antes dependía implícitamente de que `classify_request` rechazara el valor más abajo) -- cualquier valor fuera de `SUPPORTED_DOMAINS` (cfo/abate) se rechaza con `ValueError` de entrada, sin tocar la tarea ni el historial.
+- **Registra actor y evento de auditoría**: confirmado -- el evento de clasificación queda con `actor` = el `user_id` de quien completó (nunca "ai" ni "system"), y sin `extraction_provider` en el detalle (prueba de que no hubo ningún llamado a IA).
+
+### "Acerca de NicOS" + build-info.json
+
+- `scripts/generate-build-info.js`: genera `build/build-info.json` (versión, commit SHA completo y corto, si hay cambios sin commitear, fecha de build, hash sha256 de `policies/risk_policy.yaml`). Se corre automáticamente antes de `electron-builder` (`npm run dist:mac` / `dist:win`), nunca a mano. Deliberadamente NO incluye plataforma/arquitectura/versión de Electron -- eso se lee en tiempo de ejecución (`process.platform/arch/versions.electron`), más preciso que congelarlo en el build.
+- Empaquetado como `extraResource` plano (`Contents/Resources/build-info.json`), fuera del asar a propósito -- así los scripts de exportación de logs (bash/PowerShell) lo leen con un `cat`/`Get-Content` común.
+- Nueva ruta `GET /api/v1/system/status` (sidecar, bloqueada en el listener de red igual que `/director/summary`): `core_running`, `tailscale_configured`, `tailscale_connected`, `policy_version`, `policy_hash`, `python_version` -- deliberadamente sin IP, puerto, ni nada que identifique el dispositivo.
+- Nuevo IPC `nicos:get-about-info` (main.js) combina `build-info.json` + entorno real (Electron/Node/plataforma/arquitectura) + rol de esta instalación + (solo si es Director) el estado del Core, consultado al sidecar local.
+- Nueva pestaña "Acerca de" en ambas vistas (`renderer/shared/about-panel.js`, compartido).
+- `scripts/exportar_logs_mac.sh` / `exportar_logs_windows.ps1`: nueva sección `build_info` -- busca primero en el checkout de desarrollo, después en la instalación real.
+- `package.json`: versión bumpeada de `0.1.0` a `0.2.1` (reflejaba la primera iteración, no la real).
+
+### Empaquetado real -- un hallazgo de empaquetado real, corregido
+
+Al reconstruir el binario del sidecar (PyInstaller) para incluir el código de rc5/rc6/rc7, el binario arrancaba pero **la base de datos nunca se creaba** (`sqlite3.OperationalError: no such table: tasks`). Causa: `nicos-sidecar.spec` tenía `datas=[]` vacío -- `migrations/*.sql` y `provider_matrix.json` nunca se incluían en el binario compilado. `db.py`/`ai_router.py` los buscan con una ruta relativa a `__file__`, que en un binario "frozen" de PyInstaller resuelve a `sys._MEIPASS` -- sin empaquetarlos ahí, las migraciones no encontraban ningún `.sql` (tabla `tasks` nunca creada) y `provider_matrix.json` caía siempre al default hardcodeado. Corregido agregando ambos a `datas` en el `.spec`, con destinos que coinciden exactamente con lo que el código ya esperaba. Confirmado tras el fix: las 4 migraciones se aplican solas al primer arranque del binario compilado.
+
+### Verificación del `.dmg` real
+
+- `npm run dist:mac` generó `dist/NicOS Desktop-0.2.1-arm64.dmg` (sin firma de desarrollador -- no hay certificado en esta Mac, esperado para una build local; falta antes de distribuir a Marianela).
+- Se montó el `.dmg`, se copió la app a `/Applications/`, se le quitó el atributo de cuarentena (build propia local, no descargada) y se lanzó.
+- **Hallazgo antes de tocar nada**: `~/Library/Application Support/nicos-desktop/nicos-settings.json` ya tenía `role: "director"` y un dispositivo pareado ("PC Consultorio (prueba real)") -- resto de una instalación real anterior (probablemente la prueba del `.dmg` v0.1.0 del 17/7). Se cerró el proceso antes de que tocara nada y **no se modificó ese archivo** -- todas las pruebas de esta fase se hicieron con `--user-data-dir` + variables `NICOS_*` apuntando a `/tmp`, mismo patrón que todas las fases anteriores. Nicolás debería revisar esa configuración vieja cuando tenga oportunidad.
+- Sin acceso de automatización de UI a la app instalada (bundle sin firma, el entorno de control remoto lo denegó) -- la verificación de los flujos críticos se hizo contra la app real corriendo, por su API HTTP real (mismo mecanismo que expone su propia UI), no simulada:
+  - Rol Director asignado escribiendo `nicos-settings.json` directamente (mismo mecanismo que usa la propia app al guardar).
+  - Sidecar real (el binario corregido) arrancó solo, aplicó las 4 migraciones, sirvió `/ping`, `/director/summary`, `/api/v1/system/status` -- confirmado con datos reales (`policy_hash`, `python_version`, etc.).
+  - `build-info.json` confirmado legible como recurso plano en `Contents/Resources/`.
+  - Pairing real por la red de Tailscale (`100.114.131.64:47500`): código generado, completado, token emitido.
+  - Tarea creada por la red con ese token: extracción falló limpiamente (sin claves de IA en esta instancia de prueba) -- `failed`, `extraction_attempts: 1`, sin ningún reintento.
+  - Listado y revocación de dispositivo (ruta local, confiada); confirmado que el token revocado deja de servir por la red (`token inválido o ausente`).
+  - `scripts/exportar_logs_mac.sh` corrido contra el checkout real: `build_info.txt` con los datos correctos.
+- No se probó de forma interactiva/visual la pestaña "Acerca de" dentro de la app instalada (mismo bloqueo de automatización) -- el mismo código (`about-panel.js`) ya se había cargado sin errores en las instancias de desarrollo usadas durante toda la sesión, y el pipeline de datos que consume (`nicos:get-about-info` -> `/api/v1/system/status` -> `build-info.json`) quedó confirmado extremo a extremo por HTTP real, así que la única pieza sin verificación visual directa es el renderizado final del HTML/CSS.
+
+### Cierre de la fase
+
+- Suite completo: **25/25**, sin regresiones.
+- Ningún archivo productivo tocado; ninguna acción financiera ejecutada; la configuración real preexistente en `~/Library/Application Support/nicos-desktop` no se modificó.
+
+## Pendiente (después de esta fase, en orden)
+
+1. Revisar con Nicolás la configuración real preexistente encontrada en `~/Library/Application Support/nicos-desktop` (hallazgo de esta fase, sin tocar).
+2. Confirmar visualmente la pestaña "Acerca de" en la app instalada cuando haya acceso interactivo (no bloqueado por automatización).
+3. Preparar el `.exe` de Operativa (requiere PyInstaller para Windows -- no se puede cross-compilar limpio desde esta Mac).
+4. Prueba física real en Windows (PC de Marianela).
+5. Llamada real exitosa a OpenAI cuando Nicolás tenga crédito disponible en esa cuenta.
+6. Recién entonces, evaluar `v0.2.1` estable.
+
+`OpenAI 429 insufficient_quota` sigue siendo un problema de cuota/configuración de la cuenta de Nicolás, no un bug de NicOS -- documentado como tal en todas las fases donde apareció.
