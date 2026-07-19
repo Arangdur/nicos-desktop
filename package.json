@@ -1,6 +1,6 @@
 {
   "name": "nicos-desktop",
-  "version": "0.2.1-rc.9",
+  "version": "0.2.1-rc.10",
   "description": "NicOS Desktop — consola de Nicolás (Director) y Marianela (Operativa), con Claude y OpenAI.",
   "main": "electron/main.js",
   "author": "Nicolás Buso",
@@ -10,7 +10,7 @@
     "start": "electron .",
     "build-info": "node scripts/generate-build-info.js",
     "dist:mac": "npm run build-info && electron-builder --mac",
-    "dist:win": "npm run build-info && electron-builder --win"
+    "dist:win": "npm run build-info && electron-builder --win --dir && node scripts/verify-win-package.js dist && electron-builder --win"
   },
   "devDependencies": {
     "electron": "^31.0.0",
@@ -46,14 +46,6 @@
     "win": {
       "target": "nsis",
       "extraResources": [
-        {
-          "from": "sidecar/dist/nicos-sidecar.exe",
-          "to": "sidecar/nicos-sidecar.exe"
-        },
-        {
-          "from": "policies",
-          "to": "policies"
-        },
         {
           "from": "build/build-info.json",
           "to": "build-info.json"

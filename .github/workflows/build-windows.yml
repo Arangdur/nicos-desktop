@@ -1,8 +1,12 @@
 name: Build Windows installer
 
-# Se dispara manualmente o al pushear a main. No se puede compilar el .exe de forma
-# confiable desde macOS (módulos nativos de Node y el binario de PyInstaller deben
-# construirse en el mismo SO destino) — por eso este workflow corre en windows-latest.
+# Se dispara manualmente o al pushear a main. Genera el paquete Operativa
+# para Windows -- SIN Python, sin el sidecar. Windows nunca es Director (esa
+# distinción ya existe en tiempo de ejecución en main.js/_bootAndLoad: "solo
+# el rol Director levanta el sidecar Python"), así que este workflow no
+# instala Python ni compila nada con PyInstaller -- ver rc10, donde se separó
+# package.json build.win.extraResources del de Mac (antes copiaba, sin
+# necesidad, el mismo sidecar/nicos-sidecar.exe + policies/ que Mac).
 on:
   workflow_dispatch:
   push:
@@ -18,28 +22,13 @@ jobs:
         with:
           node-version: '20'
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Instalar dependencias del sidecar
-        working-directory: sidecar
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Compilar el sidecar con PyInstaller (Windows)
-        working-directory: sidecar
-        # Usa nicos-sidecar.spec, NO una invocación cruda de pyinstaller --onefile
-        # ...server.py -- ese comando regenera un spec por defecto con datas=[],
-        # que es exactamente el bug encontrado y corregido en rc7 (migrations/*.sql
-        # y provider_matrix.json nunca se empaquetan -> la tabla 'tasks' no se crea
-        # nunca). El .spec ya versionado en el repo es la única fuente correcta.
-        run: |
-          pyinstaller nicos-sidecar.spec
-
       - name: Instalar dependencias de Electron
         run: npm install
+
+      - name: Generar staging sin empaquetar y verificar que no lleva el sidecar
+        run: |
+          npx electron-builder --win --dir
+          node scripts/verify-win-package.js dist
 
       - name: Generar instalador .exe
         run: npx electron-builder --win
