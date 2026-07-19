@@ -1,6 +1,6 @@
 {
   "name": "nicos-desktop",
-  "version": "0.2.1",
+  "version": "0.2.1-rc.7",
   "description": "NicOS Desktop — consola de Nicolás (Director) y Marianela (Operativa), con Claude y OpenAI.",
   "main": "electron/main.js",
   "author": "Nicolás Buso",
@@ -19,6 +19,7 @@
   "build": {
     "appId": "com.nicolasbuso.nicos-desktop",
     "productName": "NicOS Desktop",
+    "artifactName": "NicOS-Desktop-${version}-${arch}.${ext}",
     "files": [
       "electron/**/*",
       "renderer/**/*",

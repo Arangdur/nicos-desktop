@@ -204,10 +204,56 @@ Al reconstruir el binario del sidecar (PyInstaller) para incluir el código de r
 - Suite completo: **25/25**, sin regresiones.
 - Ningún archivo productivo tocado; ninguna acción financiera ejecutada; la configuración real preexistente en `~/Library/Application Support/nicos-desktop` no se modificó.
 
+## Fase 6: auditoría de configuración vieja, versionado del `.dmg`, reinstalación (v0.2.1-rc7, 18-19/7/2026)
+
+Nicolás (vía revisión de ChatGPT) aprobó rc7 "como candidata empaquetada para Mac, pero todavía no como versión estable", y pidió cerrar 3 puntos antes de avanzar a Windows: (1) auditar y resolver la configuración vieja encontrada en Fase 5 en vez de ignorarla, (2) corregir el nombre/versión del `.dmg` (mostraba `0.2.1` cuando lo probado era `rc7`), (3) verificación visual manual -- delegada explícitamente a Nicolás, no automatizada.
+
+### Punto 1 -- auditoría de la configuración vieja
+
+Antes de tocar nada: backup completo a `~/Desktop/nicos-config-audit-backup-<timestamp>/` (copia de `~/Library/Application Support/nicos-desktop/` completa + copia de la base real `sidecar/nicos.db`).
+
+Auditoría de la base real (`sidecar/nicos.db`, fuera de git):
+- Esquema en migración `003_ledger_reconciliacion.sql` (una detrás del HEAD actual, que ya tiene `004`) -- esperable para un archivo dormido desde antes de rc-lo-que-sea; la propia app aplicaría `004` sola al arrancar contra ese archivo.
+- **0 filas** en `tasks`, `task_events`, `execution_attempts` -- nunca hubo actividad real de tareas en esa base.
+- **1 dispositivo pareado sin revocar**: `f12e33de13431209` ("PC de Marianela real", pareado 18/7). **Revocado** en esta fase vía `pairing.revoke_device()` corrido directo contra esa base.
+- Ninguna clave de API en texto plano en ningún lado (`nicos-settings.json` ni `nicos.db`).
+- El token del dispositivo pareado que queda en `nicos-settings.json` ("PC Consultorio (prueba real)") se confirmó como ciphertext genuino (decodificado en base64, no es UTF-8 plano) -- consistente con que `settings-store.js` lo cifra con `safeStorage` (Keychain) antes de guardarlo.
+- Fechas del archivo (creado 17/7 17:44, modificado 17/7 22:24) consistentes con la propia prueba de Nicolás con el `.dmg` v0.1.0 del 17/7, anterior a que existiera el candado de rol en el proceso principal.
+
+**Pendiente, no bloqueante**: borrar `nicos-settings.json` y `nicos-outbox.json` de `~/Library/Application Support/nicos-desktop/` para dejar un perfil de primer arranque real. El intento de `rm` fue bloqueado por la clasificadora de permisos del propio entorno de automatización (acción real fuera del repo) -- ya con backup completo, queda para que Nicolás lo corra él mismo:
+```
+rm ~/Library/"Application Support"/nicos-desktop/nicos-settings.json ~/Library/"Application Support"/nicos-desktop/nicos-outbox.json
+```
+
+### Punto 2 -- versionado del `.dmg`
+
+- `package.json`: `"version"` de `"0.2.1"` a `"0.2.1-rc.7"` (formato semver de prerelease); agregado `"artifactName": "NicOS-Desktop-${version}-${arch}.${ext}"` al bloque `build` (aplica a Mac y, más adelante, a Windows).
+- `npm run dist:mac` regenerado: `dist/NicOS-Desktop-0.2.1-rc.7-arm64.dmg`, con `build-info.json` embebido mostrando `"version": "0.2.1-rc.7"` (confirmado leyendo el `.dmg` montado y la instalación final). Los `.dmg` viejos (`0.1.0`, `0.2.1` sin sufijo) se borraron de `dist/` (artefactos de build regenerables, no datos).
+
+### Punto 3 -- verificación visual manual
+
+Explícitamente delegada a Nicolás (no automatizable en este entorno -- app sin firma, acceso de automatización de UI denegado). Pasos que él debe seguir ya se los indicó ChatGPT: abrir `/Applications/NicOS Desktop.app`, entrar a "Acerca de NicOS", confirmar edición/versión/commit/fecha/plataforma/Electron/Python/hash de política/estado de Core y Tailscale, y confirmar ausencia de claves/tokens/rutas privadas/datos financieros.
+
+### Reinstalación limpia y reverificación de flujos críticos (puntos 4-5 del orden recomendado)
+
+- `/Applications/NicOS Desktop.app` reemplazada por el build `0.2.1-rc.7` recién generado (mismo patrón: copiar desde el `.dmg` montado, `xattr -cr` para quitar cuarentena).
+- Verificación repetida con una instancia aislada nueva (`--user-data-dir` + `NICOS_*` apuntando a `/tmp`, nunca a rutas reales): perfil sin rol (primer arranque real) no levanta el sidecar hasta que se asigna `role: "director"` (comportamiento esperado, documentado en `main.js`) -- se sembró ese rol directamente en el `nicos-settings.json` del perfil aislado (no el real) para poder verificar por HTTP.
+  - Sidecar del binario reinstalado arrancó solo, aplicó las **4** migraciones (incluida la `004`, la más nueva) desde cero.
+  - `pairing/start` + `pairing/complete`: código generado y token emitido correctamente.
+  - Tarea creada con ese token, recogida por el worker (`locked_by` poblado -- reclamo atómico funcionando), falló limpiamente por falta de clave de OpenAI en ese perfil de prueba (`extraction_attempts: 1`, sin reintentos silenciosos) -- comportamiento esperado, no es el bloqueo real (ese requiere crédito real de la cuenta de Nicolás, pendiente aparte).
+  - Dispositivo listado y revocado por la ruta local (confiada); `revoked_at` quedó poblado correctamente en la base.
+  - **Nota de metodología**: la prueba HTTP directa de "token revocado rechazado por la red" no se pudo repetir en este perfil aislado porque no tiene Tailscale configurado (el listener LAN, el único que valida el Bearer token contra `pairing.verify_token()`, nunca se levantó -- el servidor local siempre autentica como Director de confianza, por diseño). Ese camino específico ya está cubierto por la consulta SQL de `verify_token()` (`WHERE revoked_at IS NULL`, trivialmente correcta) y ya se probó por la red real de Tailscale en la Fase 5.
+
+### Cierre de la fase
+
+- Ningún dato productivo real tocado más allá de la revocación deliberada del dispositivo huérfano (con backup previo).
+- `nicos-settings.json`/`nicos-outbox.json` reales siguen sin borrar -- acción pendiente del propio Nicolás (comando arriba).
+- `package.json` con versión/artifactName corregidos; `.dmg` regenerado con el nombre correcto; app reinstalada desde ese build.
+
 ## Pendiente (después de esta fase, en orden)
 
-1. Revisar con Nicolás la configuración real preexistente encontrada en `~/Library/Application Support/nicos-desktop` (hallazgo de esta fase, sin tocar).
-2. Confirmar visualmente la pestaña "Acerca de" en la app instalada cuando haya acceso interactivo (no bloqueado por automatización).
+1. Nicolás: correr el `rm` de los dos archivos de configuración vieja (comando arriba), o confirmar que prefiere dejarlos como están.
+2. Nicolás: verificación visual manual de "Acerca de NicOS" en `/Applications/NicOS Desktop.app` (pasos ya indicados por ChatGPT).
 3. Preparar el `.exe` de Operativa (requiere PyInstaller para Windows -- no se puede cross-compilar limpio desde esta Mac).
 4. Prueba física real en Windows (PC de Marianela).
 5. Llamada real exitosa a OpenAI cuando Nicolás tenga crédito disponible en esa cuenta.
