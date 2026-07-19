@@ -1,4 +1,4 @@
-# Guía de prueba física — NicOS Desktop v0.2.1-rc3
+# Guía de prueba física — NicOS Desktop v0.2.1-rc9
 
 Preparado para la sesión en persona con Nicolás (Director, Mac) y Marianela (Operativa, PC Windows). Cubre: Tailscale en ambas máquinas, instalación en Windows, el checklist de 9 pasos aprobado, comandos de diagnóstico, exportación de logs, y desinstalación/revocación.
 
@@ -8,10 +8,10 @@ Preparado para la sesión en persona con Nicolás (Director, Mac) y Marianela (O
 
 ## 0. Antes de empezar
 
-- [ ] Rama `feature/nicos-v0.2`, exactamente en el tag **`v0.2.1-rc4`** (`git describe --tags` debe decir `v0.2.1-rc4`, no un commit posterior sin identificar). `v0.2.1-rc3` sigue existiendo y no se mueve — marca el commit del fix de reconciliación en aislamiento; `v0.2.1-rc4` es el que además incluye esta guía, los exportadores sanitizados, y la corrección del empaquetado local en Windows. Ver `docs/REGISTRO_VERSION_Y_PAQUETES.md` para registrar el SHA y, más adelante, los hashes de los paquetes instalados.
+- [ ] Rama `feature/nicos-v0.2`, exactamente en el tag **`v0.2.1-rc9`** (`git describe --tags` debe decir `v0.2.1-rc9`, commit `826325e`, no un commit posterior sin identificar). Los tags `rc3`-`rc8` siguen existiendo y no se mueven -- son etapas previas ya cerradas; `rc9` es el candidato vigente, el único que corresponde llevar a Windows. Ver `docs/REGISTRO_VERSION_Y_PAQUETES.md` para registrar el SHA y, más adelante, los hashes de los paquetes instalados.
 - [ ] `npm install` corrido en la Mac (`cd "NicOS Desktop" && npm install`).
 - [ ] Sidecar con su venv armado (`cd sidecar && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`).
-- [ ] Confirmar que el suite de tests pasa antes de arrancar: `python3 sidecar/tests/run_all.py` → debe decir `16/16 archivos de test pasaron`.
+- [ ] Confirmar que el suite de tests pasa antes de arrancar: `python3 sidecar/tests/run_all.py` → debe decir `25/25 archivos de test pasaron`.
 
 ---
 
@@ -74,20 +74,27 @@ cd sidecar
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-pyinstaller --onefile --name nicos-sidecar --distpath dist --workpath build --specpath . server.py
+pyinstaller nicos-sidecar.spec
 cd ..
 npm install
-npx electron-builder --win
+npm run dist:win
 ```
 
-El instalador queda en `dist\*.exe`. Windows SmartScreen va a advertir "editor desconocido" (no está firmado) — "Más información" → "Ejecutar de todas formas".
+**Importante**: compilar el sidecar con `pyinstaller nicos-sidecar.spec` (el archivo ya versionado en el repo), **no** con un comando `pyinstaller --onefile ... server.py` armado a mano -- ese comando regenera un spec por defecto con `datas=[]`, que es exactamente el bug de empaquetado ya encontrado y corregido en rc7 (las migraciones y `provider_matrix.json` nunca se incluyen, la tabla `tasks` no llega a crearse nunca). Usar `npm run dist:win` (no `npx electron-builder --win` directo) para que también se regenere `build-info.json` antes de empaquetar.
 
-*(Alternativa, si en algún momento se decide tener el proyecto en GitHub para CI: el workflow `.github/workflows/build-windows.yml` ya está escrito y hace exactamente estos mismos pasos en `windows-latest`, subiendo el `.exe` como artefacto. Requiere crear/usar un repo y autorizar el push — **no hacer esto sin confirmarlo explícitamente con Nicolás en el momento**, es una decisión suya, no algo para resolver de antemano.)*
+El instalador queda en `dist\NicOS-Desktop-0.2.1-rc.9-<arch>.exe` (nombre exacto según `artifactName` de `package.json`). Windows SmartScreen va a advertir "editor desconocido" (no está firmado) — "Más información" → "Ejecutar de todas formas".
+
+*(Alternativa, si en algún momento se decide tener el proyecto en GitHub para CI: el workflow `.github/workflows/build-windows.yml` ya está escrito y hace exactamente estos mismos pasos en `windows-latest` -- incluida la corrección de usar `nicos-sidecar.spec` -- subiendo el `.exe` como artefacto. Requiere crear/usar un repo y autorizar el push — **no hacer esto sin confirmarlo explícitamente con Nicolás en el momento**, es una decisión suya, no algo para resolver de antemano.)*
 
 **Por qué esto es obligatorio antes del merge, no opcional**: un empaquetado de Electron puede fallar de formas que `npm start` nunca muestra — rutas relativas rotas, el sidecar no encontrado en su ubicación empaquetada, permisos de Windows, firewall bloqueando el puerto de Tailscale, `safeStorage` sin proveedor de cifrado disponible en esa PC, archivos que quedaron afuera del build, actualización del outbox, inicio automático, o el propio antivirus/SmartScreen interfiriendo. Repetir como mínimo los pasos 4 (crear tarea → aprobar) y 7 (outbox desconectado) del checklist de abajo, pero contra el `.exe` instalado, no contra `npm start`.
 
 - [ ] El `.exe` se generó sin errores.
+- [ ] SHA-256 del instalador calculado y anotado en `REGISTRO_VERSION_Y_PAQUETES.md`:
+  ```powershell
+  Get-FileHash "dist\NicOS-Desktop-0.2.1-rc.9-<arch>.exe" -Algorithm SHA256
+  ```
 - [ ] Instalado y abierto en la PC de Marianela, sin errores.
+- [ ] En "Acerca de NicOS" (pestaña Operativa), confirmar que `build-info.json` embebido muestra: versión `0.2.1-rc.9`, commit `826325e`, edición **Operativa (Marianela)**, plataforma `win32`/arquitectura correcta, y el mismo hash de `risk_policy.yaml` que en Mac (`80aae8f444c65605f3c413c01ec326dce7d1bdd9a7feb91e2f0dccb1e0b3847d`) -- si no coincide, la política quedó desincronizada entre plataformas, parar y avisar.
 - [ ] Repetir el paso 5 (flujo de tareas) contra el paquete instalado.
 - [ ] Repetir el paso 7 (outbox desconectado) contra el paquete instalado.
 
@@ -135,6 +142,16 @@ En la PC de Marianela:
 3. Prender de nuevo el sidecar en la Mac.
    - [ ] Al ratito (el outbox reintenta solo), la tarea se envía y desaparece del contador de pendientes en Windows.
    - [ ] En la Mac, la tarea aparece UNA sola vez en la Bandeja — no duplicada (la `idempotency_key` generada del lado de Windows previene esto, ya cubierto por `tasks.create_task`'s `UNIQUE` constraint).
+
+## 7bis. Reinicio de la PC de Marianela (Windows)
+
+Con al menos una tarea pendiente en el outbox local (repetir el paso 1 de la sección 7 si hace falta, sin reconectar la Mac todavía):
+
+1. Reiniciar la PC de Marianela (reinicio real de Windows, no solo cerrar y volver a abrir la app).
+2. Al volver a iniciar sesión, abrir NicOS Desktop de nuevo.
+   - [ ] Abre sin errores, mantiene el rol Operativa y el dispositivo vinculado (no vuelve al selector de rol).
+   - [ ] El contador de tareas en outbox sigue mostrando lo que había antes de reiniciar -- el archivo local (`nicos-outbox.json`) sobrevivió al reinicio.
+3. Reconectar la Mac (sidecar activo) y confirmar que el outbox se vacía solo, como en el paso 7, sin duplicar la tarea en la Bandeja del Director.
 
 ## 8. Caída de Tailscale — confirmar que no hay fallback a la LAN común
 
@@ -254,5 +271,10 @@ npm start 2>&1 | Tee-Object -FilePath "$env:USERPROFILE\Desktop\nicos-windows-$(
 **Desinstalar del todo:**
 - Si se usó la Opción A (código fuente): simplemente borrar la carpeta copiada en la PC de Marianela.
 - Si se usó la Opción B (instalador `.exe`): desinstalar desde "Agregar o quitar programas" de Windows, como cualquier app.
+
+**Reinstalación** (confirmar que no queda nada roto tras desinstalar):
+- [ ] Con la app ya desinstalada, correr el instalador `.exe` de nuevo.
+- [ ] Abre sin errores y muestra el selector de rol (perfil limpio, ya que se desinstaló) -- si conserva rol/dispositivo de la prueba anterior, es porque `%APPDATA%\nicos-desktop\` no se borró junto con la desinstalación (esperable -- el desinstalador de NSIS no borra `userData` por defecto). Si se quiere un primer arranque limpio real, borrar esa carpeta a mano antes de reabrir.
+- [ ] Repetir el pairing (paso 4) una vez más contra esta reinstalación, para confirmar que no quedó ningún estado corrupto del ciclo anterior.
 
 **Revocación en Tailscale** (capa adicional, independiente del token de NicOS): desde el admin console de Tailscale (`login.tailscale.com/admin/machines`), se puede desconectar/eliminar la máquina de Marianela de la red de Tailscale — dos revocaciones independientes (token de NicOS + red de Tailscale), documentado también en el README.
