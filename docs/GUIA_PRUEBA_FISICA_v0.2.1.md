@@ -1,4 +1,4 @@
-# Guía de prueba física — NicOS Desktop v0.2.1-rc9
+# Guía de prueba física — NicOS Desktop v0.2.1-rc10
 
 Preparado para la sesión en persona con Nicolás (Director, Mac) y Marianela (Operativa, PC Windows). Cubre: Tailscale en ambas máquinas, instalación en Windows, el checklist de 9 pasos aprobado, comandos de diagnóstico, exportación de logs, y desinstalación/revocación.
 
@@ -8,7 +8,7 @@ Preparado para la sesión en persona con Nicolás (Director, Mac) y Marianela (O
 
 ## 0. Antes de empezar
 
-- [ ] Rama `feature/nicos-v0.2`, exactamente en el tag **`v0.2.1-rc9`** (`git describe --tags` debe decir `v0.2.1-rc9`, commit `826325e`, no un commit posterior sin identificar). Los tags `rc3`-`rc8` siguen existiendo y no se mueven -- son etapas previas ya cerradas; `rc9` es el candidato vigente, el único que corresponde llevar a Windows. Ver `docs/REGISTRO_VERSION_Y_PAQUETES.md` para registrar el SHA y, más adelante, los hashes de los paquetes instalados.
+- [ ] Rama `feature/nicos-v0.2`, exactamente en el tag **`v0.2.1-rc10`** (`git describe --tags` debe decir `v0.2.1-rc10`, commit `cbec431`, no un commit posterior sin identificar). Los tags `rc3`-`rc8` siguen existiendo y no se mueven -- son etapas previas ya cerradas; `rc10` es el candidato vigente, el único que corresponde llevar a Windows. Ver `docs/REGISTRO_VERSION_Y_PAQUETES.md` para registrar el SHA y, más adelante, los hashes de los paquetes instalados.
 - [ ] `npm install` corrido en la Mac (`cd "NicOS Desktop" && npm install`).
 - [ ] Sidecar con su venv armado (`cd sidecar && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`).
 - [ ] Confirmar que el suite de tests pasa antes de arrancar: `python3 sidecar/tests/run_all.py` → debe decir `25/25 archivos de test pasaron`.
@@ -70,31 +70,25 @@ Ventaja de este camino para la primera prueba: permite depurar rápido y separa 
 **No hace falta GitHub para esto.** `electron-builder` empaqueta localmente, en la misma PC Windows — no requiere subir el código a ningún lado. Directamente en la PC de Marianela, con la carpeta del proyecto copiada (mismo paso 2 de la Opción A):
 
 ```powershell
-cd sidecar
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-pyinstaller nicos-sidecar.spec
-cd ..
 npm install
 npm run dist:win
 ```
 
-**Importante**: compilar el sidecar con `pyinstaller nicos-sidecar.spec` (el archivo ya versionado en el repo), **no** con un comando `pyinstaller --onefile ... server.py` armado a mano -- ese comando regenera un spec por defecto con `datas=[]`, que es exactamente el bug de empaquetado ya encontrado y corregido en rc7 (las migraciones y `provider_matrix.json` nunca se incluyen, la tabla `tasks` no llega a crearse nunca). Usar `npm run dist:win` (no `npx electron-builder --win` directo) para que también se regenere `build-info.json` antes de empaquetar.
+**Desde rc10, este paso NO instala Python ni compila nada con PyInstaller** -- el paquete Operativa/Windows no lleva el sidecar (hallazgo de revisión externa: antes copiaba, sin necesidad, el mismo `sidecar/nicos-sidecar.exe` + `policies/` que Mac, aumentando la superficie de ataque sin que Operativa lo use nunca). `npm run dist:win` ahora: regenera `build-info.json`, genera un staging sin empaquetar (`--dir`), corre `scripts/verify-win-package.js` (falla fuerte si algo volviera a colar el sidecar, migraciones, `provider_matrix.json` o `policies/`), y solo si eso pasa genera el instalador real.
 
-El instalador queda en `dist\NicOS-Desktop-0.2.1-rc.9-<arch>.exe` (nombre exacto según `artifactName` de `package.json`). Windows SmartScreen va a advertir "editor desconocido" (no está firmado) — "Más información" → "Ejecutar de todas formas".
+El instalador queda en `dist\NicOS-Desktop-0.2.1-rc.10-<arch>.exe` (nombre exacto según `artifactName` de `package.json`, `<arch>` según la PC -- normalmente `x64`). Windows SmartScreen va a advertir "editor desconocido" (no está firmado) — "Más información" → "Ejecutar de todas formas".
 
-*(Alternativa, si en algún momento se decide tener el proyecto en GitHub para CI: el workflow `.github/workflows/build-windows.yml` ya está escrito y hace exactamente estos mismos pasos en `windows-latest` -- incluida la corrección de usar `nicos-sidecar.spec` -- subiendo el `.exe` como artefacto. Requiere crear/usar un repo y autorizar el push — **no hacer esto sin confirmarlo explícitamente con Nicolás en el momento**, es una decisión suya, no algo para resolver de antemano.)*
+*(Alternativa, si en algún momento se decide tener el proyecto en GitHub para CI: el workflow `.github/workflows/build-windows.yml` ya está escrito y hace exactamente estos mismos pasos en `windows-latest`, con el mismo chequeo automático, subiendo el `.exe` como artefacto. Requiere crear/usar un repo y autorizar el push — **no hacer esto sin confirmarlo explícitamente con Nicolás en el momento**, es una decisión suya, no algo para resolver de antemano.)*
 
-**Por qué esto es obligatorio antes del merge, no opcional**: un empaquetado de Electron puede fallar de formas que `npm start` nunca muestra — rutas relativas rotas, el sidecar no encontrado en su ubicación empaquetada, permisos de Windows, firewall bloqueando el puerto de Tailscale, `safeStorage` sin proveedor de cifrado disponible en esa PC, archivos que quedaron afuera del build, actualización del outbox, inicio automático, o el propio antivirus/SmartScreen interfiriendo. Repetir como mínimo los pasos 4 (crear tarea → aprobar) y 7 (outbox desconectado) del checklist de abajo, pero contra el `.exe` instalado, no contra `npm start`.
+**Por qué esto es obligatorio antes del merge, no opcional**: un empaquetado de Electron puede fallar de formas que `npm start` nunca muestra — rutas relativas rotas, permisos de Windows, firewall bloqueando el puerto de Tailscale, `safeStorage` sin proveedor de cifrado disponible en esa PC, archivos que quedaron afuera del build, actualización del outbox, inicio automático, o el propio antivirus/SmartScreen interfiriendo. Repetir como mínimo los pasos 4 (crear tarea → aprobar) y 7 (outbox desconectado) del checklist de abajo, pero contra el `.exe` instalado, no contra `npm start`.
 
-- [ ] El `.exe` se generó sin errores.
+- [ ] El `.exe` se generó sin errores, y `verify-win-package.js` no reportó ningún hallazgo (si el script falla, **no seguir** -- algo volvió a incluir el sidecar).
 - [ ] SHA-256 del instalador calculado y anotado en `REGISTRO_VERSION_Y_PAQUETES.md`:
   ```powershell
-  Get-FileHash "dist\NicOS-Desktop-0.2.1-rc.9-<arch>.exe" -Algorithm SHA256
+  Get-FileHash "dist\NicOS-Desktop-0.2.1-rc.10-<arch>.exe" -Algorithm SHA256
   ```
 - [ ] Instalado y abierto en la PC de Marianela, sin errores.
-- [ ] En "Acerca de NicOS" (pestaña Operativa), confirmar que `build-info.json` embebido muestra: versión `0.2.1-rc.9`, commit `826325e`, edición **Operativa (Marianela)**, plataforma `win32`/arquitectura correcta, y el mismo hash de `risk_policy.yaml` que en Mac (`80aae8f444c65605f3c413c01ec326dce7d1bdd9a7feb91e2f0dccb1e0b3847d`) -- si no coincide, la política quedó desincronizada entre plataformas, parar y avisar.
+- [ ] En "Acerca de NicOS" (pestaña Operativa), confirmar que `build-info.json` embebido muestra: versión `0.2.1-rc.10`, commit `cbec431`, edición **Operativa (Marianela)**, plataforma `win32`/arquitectura correcta, y el mismo hash de `risk_policy.yaml` que en Mac (`80aae8f444c65605f3c413c01ec326dce7d1bdd9a7feb91e2f0dccb1e0b3847d`) -- si no coincide, la política quedó desincronizada entre plataformas, parar y avisar.
 - [ ] Repetir el paso 5 (flujo de tareas) contra el paquete instalado.
 - [ ] Repetir el paso 7 (outbox desconectado) contra el paquete instalado.
 

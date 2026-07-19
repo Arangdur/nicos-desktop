@@ -1,11 +1,11 @@
-# Registro de versión y paquetes — prueba física v0.2.1-rc9
+# Registro de versión y paquetes — prueba física v0.2.1-rc10
 
-Completar durante la sesión física. Los tags `rc3`-`rc8` no se mueven -- son etapas previas ya cerradas (rc8 quedó aprobado como candidata Mac cerrada). `v0.2.1-rc9` es el commit exacto sobre el que debe correr esta sesión de Windows: agrega la corrección del workflow de empaquetado (`nicos-sidecar.spec` en vez de un comando `pyinstaller` armado a mano, que reproducía el bug de rc7 de migraciones nunca incluidas), sin ningún cambio de lógica operativa sobre lo ya aprobado en rc8.
+Completar durante la sesión física. Los tags `rc3`-`rc8` no se mueven -- son etapas previas ya cerradas (rc8 quedó aprobado como candidata Mac cerrada). `v0.2.1-rc10` es el commit exacto sobre el que debe correr esta sesión de Windows: agrega la corrección del workflow de empaquetado (`nicos-sidecar.spec` en vez de un comando `pyinstaller` armado a mano, que reproducía el bug de rc7 de migraciones nunca incluidas), sin ningún cambio de lógica operativa sobre lo ya aprobado en rc8.
 
 ## Commit de referencia
 
-- Tag: `v0.2.1-rc9`
-- Commit: `826325e`
+- Tag: `v0.2.1-rc10`
+- Commit: `cbec431`
 - Verificar en el momento de arrancar la sesión (en ambas máquinas, si se copió el código a Windows):
   ```bash
   git log --oneline -1
@@ -16,24 +16,24 @@ Completar durante la sesión física. Los tags `rc3`-`rc8` no se mueven -- son e
 
 ## Paquetes instalados (completar durante la sesión)
 
-### Mac (ya generado en esta Mac, Fase 7/rc9)
+### Mac (ya generado en esta Mac, Fase 7/rc10)
 
 ```bash
-shasum -a 256 "dist/NicOS-Desktop-0.2.1-rc.9-arm64.dmg"
+shasum -a 256 "dist/NicOS-Desktop-0.2.1-rc.10-arm64.dmg"
 ```
 
 | Campo | Valor |
 |---|---|
-| Archivo | `NicOS-Desktop-0.2.1-rc.9-arm64.dmg` |
-| SHA-256 | `9326a1b02c19064c8d0c73fa939c4b6d99e6982cd6a19ecaf6b160fe11443673` |
-| Generado a partir del commit | `826325e` (`git_dirty: false`) |
+| Archivo | `NicOS-Desktop-0.2.1-rc.10-arm64.dmg` |
+| SHA-256 | `319b72182aa47ff5eb9108100530af949cbf42ee85d90a558293cfc8e8964e1c` |
+| Generado a partir del commit | `cbec431` (`git_dirty: false`) |
 | Fecha/hora de instalación | 19/7/2026, build 03:25:45 UTC -- instalado en `/Applications/NicOS Desktop.app` de esta Mac |
 
 ### Windows (`.exe`, paso 2-4 del bloque Windows)
 
-En PowerShell, en la PC de Marianela, después de `npm run dist:win` (ver `docs/GUIA_PRUEBA_FISICA_v0.2.1.md`, sección 3, Opción B -- usar **exactamente** `pyinstaller nicos-sidecar.spec`, no un comando armado a mano):
+En PowerShell, en la PC de Marianela, después de `npm run dist:win` (ver `docs/GUIA_PRUEBA_FISICA_v0.2.1.md`, sección 3, Opción B -- desde rc10 este comando ya no compila ni empaqueta Python, y corre solo `scripts/verify-win-package.js` antes de generar el instalador):
 ```powershell
-Get-FileHash "dist\NicOS-Desktop-0.2.1-rc.9-<arch>.exe" -Algorithm SHA256
+Get-FileHash "dist\NicOS-Desktop-0.2.1-rc.10-<arch>.exe" -Algorithm SHA256
 ```
 
 | Campo | Valor |
@@ -47,11 +47,15 @@ Verificar además, leyendo `build-info.json` embebido (vía "Acerca de NicOS" en
 
 | Campo esperado | Valor esperado | Confirmado |
 |---|---|---|
-| Versión | `0.2.1-rc.9` | |
-| Commit | `826325e` | |
+| Versión | `0.2.1-rc.10` | |
+| Commit | `cbec431` | |
 | Edición | Operativa (Marianela) | |
 | Plataforma/arquitectura | `win32` / (según la PC) | |
 | Hash de `risk_policy.yaml` | `80aae8f444c65605f3c413c01ec326dce7d1bdd9a7feb91e2f0dccb1e0b3847d` (debe coincidir con el de Mac) | |
+
+**Confirmación de superficie de ataque (hallazgo de revisión externa, rc10)**: revisar el instalador o `%LOCALAPPDATA%\Programs\NicOS Desktop\resources\` ya instalado y confirmar que **no** existe ninguna carpeta `sidecar\` ni `policies\` -- si `scripts/verify-win-package.js` pasó durante el build (paso obligatorio dentro de `npm run dist:win`), esto ya está garantizado, pero vale confirmarlo una vez más contra la instalación real:
+- [ ] Sin carpeta `sidecar\` en el paquete instalado.
+- [ ] Sin carpeta `policies\` en el paquete instalado.
 
 ## Checklist físico (completar durante la sesión -- ver detalle de cada paso en `GUIA_PRUEBA_FISICA_v0.2.1.md`)
 
