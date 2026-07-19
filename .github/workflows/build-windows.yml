@@ -30,8 +30,13 @@ jobs:
 
       - name: Compilar el sidecar con PyInstaller (Windows)
         working-directory: sidecar
+        # Usa nicos-sidecar.spec, NO una invocación cruda de pyinstaller --onefile
+        # ...server.py -- ese comando regenera un spec por defecto con datas=[],
+        # que es exactamente el bug encontrado y corregido en rc7 (migrations/*.sql
+        # y provider_matrix.json nunca se empaquetan -> la tabla 'tasks' no se crea
+        # nunca). El .spec ya versionado en el repo es la única fuente correcta.
         run: |
-          pyinstaller --onefile --name nicos-sidecar --distpath dist --workpath build --specpath . server.py
+          pyinstaller nicos-sidecar.spec
 
       - name: Instalar dependencias de Electron
         run: npm install
