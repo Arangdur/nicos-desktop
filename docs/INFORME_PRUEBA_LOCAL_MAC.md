@@ -250,13 +250,32 @@ Explícitamente delegada a Nicolás (no automatizable en este entorno -- app sin
 - `nicos-settings.json`/`nicos-outbox.json` reales siguen sin borrar -- acción pendiente del propio Nicolás (comando arriba).
 - `package.json` con versión/artifactName corregidos; `.dmg` regenerado con el nombre correcto; app reinstalada desde ese build.
 
+## Fase 7: coherencia de versión rc8, limpieza real, verificación visual (v0.2.1-rc8, 19/7/2026)
+
+Nicolás pidió (y luego autorizó hacer todo directamente): limpiar de verdad la configuración vieja real (ya con backup), corregir la inconsistencia de que el tag `v0.2.1-rc8` apuntaba a un commit cuyo `package.json`/`build-info.json` todavía decían `0.2.1-rc.7` (arrastre de la Fase 6, donde se cambió `package.json`/`artifactName` y se recompiló *después* del tag `rc7` sin resubir la versión), y hacer la verificación visual real de "Acerca de NicOS".
+
+- **Limpieza real**: `nicos-settings.json` y `nicos-outbox.json` en `~/Library/Application Support/nicos-desktop/` borrados (con el backup de la Fase 6 ya existente). `nicos.db` real, intacta, sin tocar.
+- **Corrección de versión**: `package.json` `0.2.1-rc.7` -> `0.2.1-rc.8`. `npm run dist:mac` regenerado: `dist/NicOS-Desktop-0.2.1-rc.8-arm64.dmg`, `build-info.json` embebido con `version: "0.2.1-rc.8"`. `.dmg` de `rc.7` borrado de `dist/`. App reinstalada en `/Applications/`.
+- **Verificación visual real** (con acceso de automatización concedido esta vez, a diferencia de la Fase 5/6): se abrió `/Applications/NicOS Desktop.app` de verdad, con el perfil recién limpiado -- pantalla de selección de rol apareció sin nada heredado (confirma el "primer inicio limpio" pedido). Se seleccionó Director; el Resumen mostró datos reales (Trading Bot, consultorio agregado, proyectos cowork) -- esperable, es la instalación real conectada a los datos reales de Nicolás. Se entró a "Acerca de NicOS" y se confirmó, leyendo la pantalla real:
+  - Edición: Director (Nicolás). Versión: `0.2.1-rc.8`. Commit: `80cae8e`, marcado correctamente "con cambios sin commitear" (la build se generó antes de este commit). Fecha de build correcta. Hash de `risk_policy.yaml` presente.
+  - Plataforma `darwin/arm64`, Electron `31.7.7`, Node `20.18.0`.
+  - Core (sidecar): Activo. Tailscale configurado: No / Desconectado (estado real de esta Mac en este momento). Política de riesgo con versión y hash. Python (sidecar): `3.14.3`.
+  - Nada cortado, todo legible. Sin API keys, tokens, rutas con nombre de usuario, IP, texto de tareas ni datos financieros visibles en esa pantalla.
+  - **Hallazgo**: no existe ningún botón/mecanismo para copiar la información diagnóstica -- se revisó el código de `about-panel.js` y no implementa ningún control de copiado. El punto del checklist de Nicolás que pedía verificar "que exista una forma clara de copiar la información diagnóstica sin copiar secretos" no se cumple porque esa función no existe todavía. No se agregó en esta fase (no era el alcance -- "no cambies lógica funcional"); queda como pendiente explícito para una fase futura.
+  - App cerrada limpiamente al terminar (Cmd+Q).
+- Suite completo repetido tras el fix de versión: **25/25**, sin regresiones.
+
+### Cierre de la fase
+
+- Tag `v0.2.1-rc8` (el creado en la Fase 6, sobre contenido `rc.7`) borrado y recreado sobre el commit correcto, que ya dice `0.2.1-rc.8` por dentro.
+- Único hallazgo abierto: falta el control de "copiar diagnóstico" en "Acerca de NicOS" -- no bloqueante para pasar a Windows, pendiente para una fase futura.
+
 ## Pendiente (después de esta fase, en orden)
 
-1. Nicolás: correr el `rm` de los dos archivos de configuración vieja (comando arriba), o confirmar que prefiere dejarlos como están.
-2. Nicolás: verificación visual manual de "Acerca de NicOS" en `/Applications/NicOS Desktop.app` (pasos ya indicados por ChatGPT).
-3. Preparar el `.exe` de Operativa (requiere PyInstaller para Windows -- no se puede cross-compilar limpio desde esta Mac).
-4. Prueba física real en Windows (PC de Marianela).
-5. Llamada real exitosa a OpenAI cuando Nicolás tenga crédito disponible en esa cuenta.
-6. Recién entonces, evaluar `v0.2.1` estable.
+1. (Futuro, no bloqueante) Agregar un control para copiar la información diagnóstica de "Acerca de NicOS" sin incluir secretos.
+2. Preparar el `.exe` de Operativa (requiere PyInstaller para Windows -- no se puede cross-compilar limpio desde esta Mac).
+3. Prueba física real en Windows (PC de Marianela).
+4. Llamada real exitosa a OpenAI cuando Nicolás tenga crédito disponible en esa cuenta.
+5. Recién entonces, evaluar `v0.2.1` estable.
 
 `OpenAI 429 insufficient_quota` sigue siendo un problema de cuota/configuración de la cuenta de Nicolás, no un bug de NicOS -- documentado como tal en todas las fases donde apareció.
