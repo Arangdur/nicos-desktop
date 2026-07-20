@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mockup — Trading Ampliado</title>
+<link rel="stylesheet" href="../renderer/shared/styles.css">
+<style>
+  .mockup-banner { background: #92400e; color: white; padding: 8px 24px; font-size: 12px; text-align: center; font-weight: 600; }
+  .no-signals-banner { background: var(--navy); color: white; padding: var(--space-3) var(--space-4); border-radius: 10px; font-size: 13px; margin-bottom: var(--space-4); display: flex; align-items: center; gap: 10px; }
+  .subtabs { display: flex; gap: 8px; margin-bottom: var(--space-4); }
+  .regime-badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 999px; font-weight: 700; font-size: 13px; }
+  .regime-badge.lateral { background: var(--navy-soft); color: var(--navy); }
+  .regime-badge.alcista { background: var(--green-bg); color: var(--green); }
+  .regime-badge.bajista { background: var(--red-bg); color: var(--red); }
+</style>
+</head>
+<body>
+  <div class="mockup-banner">MOCKUP — cifras de ejemplo (paper trading), sin conexión real al bot.</div>
+  <div class="banner">
+    <div>
+      <div class="title">NicOS Desktop</div>
+      <div class="subtitle">Director · Trading</div>
+    </div>
+    <span class="badge">conectado</span>
+  </div>
+
+  <div class="container">
+    <div class="tabs">
+      <button class="tab">Resumen</button>
+      <button class="tab">Tareas</button>
+      <button class="tab active">Trading</button>
+      <button class="tab">Chat</button>
+      <button class="tab">Ajustes</button>
+    </div>
+
+    <div class="no-signals-banner">
+      🚫 <span>NicOS <b>nunca</b> te dice qué comprar o vender. Este panel es solo visibilidad del bot en paper trading — la regla de "sin señales operativas autónomas" no cambia.</span>
+    </div>
+
+    <div class="subtabs">
+      <button class="tab active" data-subtab="estado">Estado actual</button>
+      <button class="tab" data-subtab="historial">Historial de trades</button>
+      <button class="tab" data-subtab="backtesting">Backtesting</button>
+    </div>
+
+    <div id="subtab-estado">
+      <div class="card">
+        <div class="row-between">
+          <h3 style="margin-bottom:0;">Estado del bot</h3>
+          <span class="regime-badge lateral">Régimen: neutral/lateral</span>
+        </div>
+        <div class="metric-grid" style="margin-top:var(--space-3);">
+          <div class="metric"><div class="metric-label">PnL total</div><div class="metric-value">19,57 <span style="font-size:13px; font-weight:500; color:var(--muted);">USDT</span></div></div>
+          <div class="metric"><div class="metric-label">Trades</div><div class="metric-value">6</div></div>
+          <div class="metric"><div class="metric-label">Win rate</div><div class="metric-value">33%</div></div>
+          <div class="metric"><div class="metric-label">Drawdown máx.</div><div class="metric-value">0.51%</div></div>
+        </div>
+        <dl class="kv-grid" style="margin-top:var(--space-4);">
+          <dt>Modo</dt><dd>Paper trading (sin dinero real)</dd>
+          <dt>Última actividad</dt><dd>06/07/2026 (9 días sin operar)</dd>
+          <dt>Estrategia activa</dt><dd>Mean reversion — rango acotado</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div id="subtab-historial" style="display:none;">
+      <div class="card">
+        <h3>Historial de trades</h3>
+        <table>
+          <tr><th>Fecha</th><th>Par</th><th>Tipo</th><th>Resultado</th></tr>
+          <tr><td>06/07/2026</td><td>BTC/USDT</td><td>Long</td><td style="color:var(--green);">+4.20 USDT</td></tr>
+          <tr><td>02/07/2026</td><td>ETH/USDT</td><td>Short</td><td style="color:var(--red);">-2.10 USDT</td></tr>
+          <tr><td>28/06/2026</td><td>BTC/USDT</td><td>Long</td><td style="color:var(--green);">+8.90 USDT</td></tr>
+          <tr><td>24/06/2026</td><td>SOL/USDT</td><td>Long</td><td style="color:var(--red);">-3.40 USDT</td></tr>
+          <tr><td>19/06/2026</td><td>BTC/USDT</td><td>Short</td><td style="color:var(--red);">-1.80 USDT</td></tr>
+          <tr><td>15/06/2026</td><td>ETH/USDT</td><td>Long</td><td style="color:var(--green);">+13.77 USDT</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div id="subtab-backtesting" style="display:none;">
+      <div class="card">
+        <h3>Backtesting</h3>
+        <p class="help-text" style="margin-bottom:var(--space-3);">Resultados de correr la estrategia actual contra datos históricos -- sirve para evaluar el bot, no para decidir operaciones en vivo.</p>
+        <label>Período</label>
+        <select id="periodo-select">
+          <option>Últimos 30 días</option>
+          <option>Últimos 90 días</option>
+          <option>Último año</option>
+        </select>
+        <div class="row-wrap" style="margin-top:var(--space-3);">
+          <button class="primary" id="btn-correr-backtest">Correr backtest</button>
+        </div>
+        <div id="backtest-resultado" style="display:none; margin-top:var(--space-4);">
+          <div class="metric-grid">
+            <div class="metric"><div class="metric-label">Retorno simulado</div><div class="metric-value">+2.4%</div></div>
+            <div class="metric"><div class="metric-label">Trades simulados</div><div class="metric-value">24</div></div>
+            <div class="metric"><div class="metric-label">Win rate</div><div class="metric-value">41%</div></div>
+            <div class="metric"><div class="metric-label">Máx. drawdown</div><div class="metric-value">3.1%</div></div>
+          </div>
+          <p class="help-text" style="margin-top:var(--space-3);">[Resultado de EJEMPLO -- en la versión real, esto corre el motor de backtesting existente del bot contra el período elegido.]</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script src="../renderer/shared/ui-helpers.js"></script>
+<script>
+document.querySelectorAll('[data-subtab]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-subtab]').forEach(b => b.classList.toggle('active', b === btn));
+    document.getElementById('subtab-estado').style.display = btn.dataset.subtab === 'estado' ? 'block' : 'none';
+    document.getElementById('subtab-historial').style.display = btn.dataset.subtab === 'historial' ? 'block' : 'none';
+    document.getElementById('subtab-backtesting').style.display = btn.dataset.subtab === 'backtesting' ? 'block' : 'none';
+  });
+});
+
+document.getElementById('btn-correr-backtest').addEventListener('click', () => {
+  const zona = document.getElementById('backtest-resultado');
+  zona.style.display = 'block';
+  showToast('Backtest simulado (mockup).', 'success');
+});
+</script>
+</body>
+</html>

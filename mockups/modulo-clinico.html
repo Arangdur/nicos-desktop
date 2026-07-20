@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mockup — Módulo Clínico</title>
+<link rel="stylesheet" href="../renderer/shared/styles.css">
+<style>
+  .mockup-banner { background: #92400e; color: white; padding: 8px 24px; font-size: 12px; text-align: center; font-weight: 600; }
+  .split { display: grid; grid-template-columns: 280px 1fr; gap: 20px; }
+  .patient-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  .patient-item:hover { background: var(--navy-soft); }
+  .patient-item.active { background: var(--navy); color: white; }
+  .patient-item .sub { font-size: 11px; color: var(--muted); }
+  .patient-item.active .sub { color: rgba(255,255,255,0.7); }
+  .evo-item { border-left: 2px solid var(--border); padding: 0 0 16px 16px; position: relative; }
+  .evo-item::before { content: ""; position: absolute; left: -5px; top: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--muted-soft); border: 2px solid white; }
+  .evo-date { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .evo-text { font-size: 14px; margin-top: 4px; white-space: pre-wrap; }
+  textarea#plaud-input { min-height: 100px; }
+  textarea#draft-output { min-height: 180px; }
+</style>
+</head>
+<body>
+  <div class="mockup-banner">MOCKUP — datos de prueba, sin conexión real a base de datos ni a IA. Para validar la idea, no el código final.</div>
+  <div class="banner">
+    <div>
+      <div class="title">NicOS Desktop</div>
+      <div class="subtitle">Director · Módulo Clínico</div>
+    </div>
+    <span class="badge">conectado</span>
+  </div>
+
+  <div class="container">
+    <div class="tabs">
+      <button class="tab">Resumen</button>
+      <button class="tab">Tareas</button>
+      <button class="tab active">Clínico</button>
+      <button class="tab">Chat</button>
+      <button class="tab">Ajustes</button>
+    </div>
+
+    <div class="split">
+      <!-- Buscador de pacientes -->
+      <div class="card">
+        <h3>Pacientes</h3>
+        <input type="text" id="buscador" placeholder="Buscar por nombre o DNI..." style="margin-bottom:12px;">
+        <div id="lista-pacientes" class="stack" style="gap:2px;"></div>
+      </div>
+
+      <!-- Ficha del paciente -->
+      <div id="ficha-paciente"></div>
+    </div>
+  </div>
+
+<script src="../renderer/shared/ui-helpers.js"></script>
+<script>
+const PACIENTES = [
+  {
+    id: 1, nombre: "Paciente Demo Uno", dni: "30.111.222", cobertura: "APROSS", edad: 34, tipo: "Psiquiatría",
+    evoluciones: [
+      { fecha: "15/07/2026", texto: "Control de seguimiento. Refiere buena adherencia a sertralina 100mg. Sueño mejorado, ánimo estable. Sin ideación autolítica. Continúa esquema actual, próximo control en 30 días." },
+      { fecha: "15/06/2026", texto: "Primera consulta de seguimiento post-alta. Episodio depresivo moderado en remisión parcial. Se ajusta dosis de sertralina de 50mg a 100mg. Psicoeducación sobre efectos adversos esperables." },
+    ],
+  },
+  {
+    id: 2, nombre: "Paciente Demo Dos", dni: "28.555.666", cobertura: "PAMI", edad: 67, tipo: "Clínica General",
+    evoluciones: [
+      { fecha: "10/07/2026", texto: "Control de HTA y DBT tipo 2. TA 130/85. Glucemia en ayunas 118. Buena adherencia a metformina. Se solicita perfil lipídico de control." },
+    ],
+  },
+  {
+    id: 3, nombre: "Paciente Demo Tres", dni: "35.222.111", cobertura: "Particular", edad: 22, tipo: "Psiquiatría",
+    evoluciones: [],
+  },
+];
+
+let pacienteActivo = null;
+
+function renderLista(filtro) {
+  const el = document.getElementById('lista-pacientes');
+  const f = (filtro || '').toLowerCase();
+  const filtrados = PACIENTES.filter(p => p.nombre.toLowerCase().includes(f) || p.dni.includes(f));
+  el.innerHTML = filtrados.map(p => `
+    <div class="patient-item ${pacienteActivo === p.id ? 'active' : ''}" data-id="${p.id}">
+      <div>${p.nombre}</div>
+      <div class="sub">${p.dni} · ${p.tipo}</div>
+    </div>
+  `).join('') || '<div class="empty">Sin resultados.</div>';
+  el.querySelectorAll('.patient-item').forEach(item => {
+    item.addEventListener('click', () => {
+      pacienteActivo = parseInt(item.dataset.id, 10);
+      renderLista(document.getElementById('buscador').value);
+      renderFicha();
+    });
+  });
+}
+
+function renderFicha() {
+  const el = document.getElementById('ficha-paciente');
+  const p = PACIENTES.find(x => x.id === pacienteActivo);
+  if (!p) {
+    el.innerHTML = '<div class="card"><div class="empty">Elegí un paciente de la lista.</div></div>';
+    return;
+  }
+  el.innerHTML = `
+    <div class="card">
+      <div class="row-between">
+        <div>
+          <h3 style="margin-bottom:4px;">${p.nombre}</h3>
+          <div style="font-size:13px; color:var(--muted);">${p.dni} · ${p.edad} años · ${p.cobertura} · ${p.tipo}</div>
+        </div>
+        <button class="secondary" id="btn-drapp">Abrir en DRAPP ↗</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Nueva evolución (desde transcripción de Plaud)</h3>
+      <label>Pegar transcripción</label>
+      <textarea id="plaud-input" placeholder="Pegá acá la transcripción cruda de Plaud AI..."></textarea>
+      <div class="row-wrap" style="margin-top:var(--space-3);">
+        <button class="primary" id="btn-generar">Generar borrador con IA</button>
+        <span style="font-size:12px; color:var(--muted);">Costo estimado: ~2-8 centavos de dólar por nota</span>
+      </div>
+      <div id="borrador-zona" style="display:none; margin-top:var(--space-4);">
+        <label>Borrador (revisá y corregí antes de guardar)</label>
+        <textarea id="draft-output"></textarea>
+        <div class="row-wrap" style="margin-top:var(--space-3);">
+          <button class="primary" id="btn-guardar">Guardar evolución</button>
+          <button class="secondary" id="btn-copiar">Copiar para pegar en DRAPP</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Informes y certificados</h3>
+      <label>Tipo de informe</label>
+      <select id="informe-tipo">
+        <option value="psiquiatrico">Informe psiquiátrico formal</option>
+        <option value="derivacion">Derivación</option>
+        <option value="peritaje">Peritaje</option>
+        <option value="alta">Alta</option>
+        <option value="certificado">Certificado simple</option>
+      </select>
+      <label>Datos / objetivo del informe</label>
+      <textarea id="informe-input" rows="3" placeholder="Ej: derivación a cardiología por antecedente de arritmia, para evaluación previa a inicio de tratamiento..."></textarea>
+      <div class="row-wrap" style="margin-top:var(--space-3);">
+        <button class="primary" id="btn-generar-informe">Generar informe con IA</button>
+        <span style="font-size:12px; color:var(--muted);">Costo estimado: ~3-10 centavos de dólar por informe</span>
+      </div>
+      <div id="informe-zona" style="display:none; margin-top:var(--space-4);">
+        <label>Informe (revisá antes de firmar/enviar)</label>
+        <textarea id="informe-output" style="min-height:160px;"></textarea>
+        <div class="row-wrap" style="margin-top:var(--space-3);">
+          <button class="secondary" id="btn-copiar-informe">Copiar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Evoluciones anteriores</h3>
+      ${p.evoluciones.length === 0 ? '<div class="empty">Sin evoluciones cargadas todavía.</div>' : p.evoluciones.map(e => `
+        <div class="evo-item">
+          <div class="evo-date">${e.fecha}</div>
+          <div class="evo-text">${e.texto}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  document.getElementById('btn-drapp').addEventListener('click', () => {
+    showToast('Mockup: acá se abriría la ficha real de este paciente en DRAPP.');
+  });
+
+  document.getElementById('btn-generar').addEventListener('click', () => {
+    const input = document.getElementById('plaud-input').value.trim();
+    if (!input) { showToast('Pegá una transcripción primero.', 'error'); return; }
+    const zona = document.getElementById('borrador-zona');
+    const output = document.getElementById('draft-output');
+    output.value = 'Generando...';
+    zona.style.display = 'block';
+    setTimeout(() => {
+      output.value = "Control de seguimiento psiquiátrico. Paciente refiere buena adherencia al tratamiento indicado, con mejoría del ánimo y del patrón de sueño respecto al control anterior. Sin ideación autolítica ni elementos de riesgo. Se mantiene esquema terapéutico actual. Se indica control en 30 días.\n\n[Este es un borrador de EJEMPLO del mockup -- en la versión real, esto sale de la API de Claude/OpenAI a partir de la transcripción pegada arriba.]";
+    }, 900);
+  });
+
+  document.getElementById('btn-guardar').addEventListener('click', async () => {
+    const ok = await showConfirm('Guardar evolución', 'Se agrega al historial de este paciente en NicOS (no en DRAPP todavía).', { confirmLabel: 'Guardar' });
+    if (!ok) return;
+    showToast('Mockup: acá se guardaría de verdad.', 'success');
+  });
+
+  document.getElementById('btn-copiar').addEventListener('click', () => {
+    showToast('Mockup: acá se copiaría el texto al portapapeles para pegar en DRAPP.', 'success');
+  });
+
+  const TIPO_LABEL_INFORME = { psiquiatrico: 'INFORME PSIQUIÁTRICO', derivacion: 'DERIVACIÓN', peritaje: 'PERITAJE', alta: 'ALTA', certificado: 'CERTIFICADO' };
+  document.getElementById('btn-generar-informe').addEventListener('click', () => {
+    const tipo = document.getElementById('informe-tipo').value;
+    const input = document.getElementById('informe-input').value.trim();
+    if (!input) { showToast('Describí el objetivo del informe primero.', 'error'); return; }
+    const zona = document.getElementById('informe-zona');
+    const output = document.getElementById('informe-output');
+    output.value = 'Generando...';
+    zona.style.display = 'block';
+    setTimeout(() => {
+      const firma = `Dr. Nicolás Buso — Médico ${p.tipo === 'Psiquiatría' ? 'Psiquiatra' : 'Generalista'} — MN 132682 / MP 39083`;
+      if (tipo === 'psiquiatrico') {
+        // Mismo formato que el prompt real "Informe Psiquiátrico para Derivación / Peritaje"
+        // de la Biblioteca de Prompts -- nomenclatura DSM-5-TR, secciones fijas.
+        output.value = `INFORME PSIQUIÁTRICO\n\nPaciente: ${p.nombre} · DNI ${p.dni} · ${p.edad} años\nCobertura: ${p.cobertura}\n\nMOTIVO DE CONSULTA / OBJETIVO DEL INFORME\n${input}\n\nHISTORIA CLÍNICA RELEVANTE\n[EJEMPLO -- se arma a partir de las evoluciones ya cargadas de este paciente.]\n\nESTADO MENTAL ACTUAL\n[EJEMPLO -- porte, conciencia, atención, pensamiento, afectividad, sueño/apetito.]\n\nDIAGNÓSTICO PRESUNTIVO/DEFINITIVO (DSM-5-TR)\n[EJEMPLO -- con diagnósticos diferenciales si corresponde.]\n\nPLAN TERAPÉUTICO Y RECOMENDACIONES\n[EJEMPLO -- conducta, medicación, seguimiento.]\n\n${firma}`;
+      } else {
+        output.value = `INFORME MÉDICO — ${TIPO_LABEL_INFORME[tipo]}\n\nPaciente: ${p.nombre} · DNI ${p.dni} · ${p.edad} años\nCobertura: ${p.cobertura}\n\nMotivo: ${input}\n\n[Cuerpo del informe de EJEMPLO -- en la versión real, la IA arma el informe completo con historia relevante, estado actual, diagnóstico y recomendaciones, a partir de las evoluciones ya cargadas de este paciente.]\n\n${firma}`;
+      }
+    }, 900);
+  });
+
+  document.getElementById('btn-copiar-informe').addEventListener('click', () => {
+    showToast('Mockup: acá se copiaría el informe al portapapeles.', 'success');
+  });
+}
+
+document.getElementById('buscador').addEventListener('input', (e) => renderLista(e.target.value));
+renderLista('');
+renderFicha();
+</script>
+</body>
+</html>

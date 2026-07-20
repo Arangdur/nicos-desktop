@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mockup — WhatsApp Consultorio</title>
+<link rel="stylesheet" href="../renderer/shared/styles.css">
+<style>
+  .mockup-banner { background: #92400e; color: white; padding: 8px 24px; font-size: 12px; text-align: center; font-weight: 600; }
+  .split { display: grid; grid-template-columns: 320px 1fr; gap: 20px; height: calc(100vh - 220px); }
+  .conv-list { overflow-y: auto; }
+  .conv-item { padding: 12px; border-radius: 8px; cursor: pointer; margin-bottom: 4px; border: 1px solid transparent; }
+  .conv-item:hover { background: var(--navy-soft); }
+  .conv-item.active { background: var(--navy-soft); border-color: var(--navy); }
+  .conv-item .name { font-weight: 600; font-size: 14px; }
+  .conv-item .preview { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .conv-item .meta-row { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
+  .conv-item .time { font-size: 11px; color: var(--muted-soft); }
+  .thread { display: flex; flex-direction: column; height: 100%; }
+  .thread-header { border-bottom: 1px solid var(--border); padding-bottom: var(--space-3); margin-bottom: var(--space-3); }
+  .thread-msgs { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px; }
+  .wa-msg { max-width: 70%; padding: 8px 12px; border-radius: 10px; font-size: 14px; }
+  .wa-msg.in { align-self: flex-start; background: var(--navy-soft); }
+  .wa-msg.out { align-self: flex-end; background: var(--green-bg); color: var(--green); }
+  .wa-msg .wa-time { font-size: 10px; color: var(--muted-soft); margin-top: 2px; }
+  .filter-row { display: flex; gap: 6px; margin-bottom: var(--space-3); flex-wrap: wrap; }
+</style>
+</head>
+<body>
+  <div class="mockup-banner">MOCKUP — conversaciones de prueba, sin conexión real a Twilio/WhatsApp ni a base de datos.</div>
+  <div class="banner">
+    <div>
+      <div class="title">NicOS Desktop</div>
+      <div class="subtitle" id="subtitle">Director · WhatsApp Consultorio</div>
+    </div>
+    <div class="row">
+      <button class="secondary" id="btn-switch-role" style="padding:6px 12px; font-size:12px;">Ver como Operativa</button>
+      <span class="badge">conectado</span>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="tabs">
+      <button class="tab">Resumen</button>
+      <button class="tab">Tareas</button>
+      <button class="tab">Clínico</button>
+      <button class="tab active">WhatsApp <span id="badge-sin-resolver"></span></button>
+      <button class="tab">Ajustes</button>
+    </div>
+
+    <div class="split">
+      <div class="card conv-list">
+        <div class="filter-row">
+          <button class="tab active" data-filter="todos">Todos</button>
+          <button class="tab" data-filter="sin_resolver">Sin resolver</button>
+          <button class="tab" data-filter="urgente">Urgentes</button>
+        </div>
+        <div id="lista-conversaciones"></div>
+      </div>
+
+      <div class="card thread" id="zona-thread"></div>
+    </div>
+  </div>
+
+<script src="../renderer/shared/ui-helpers.js"></script>
+<script>
+const TIPO_LABEL = { TURNO: 'Turno', RECETA: 'Receta', CANCELACION: 'Cancelación', CERTIFICADO: 'Certificado', ESTADO_RECETA: 'Estado receta' };
+let esOperativa = false;
+let conversaciones = [
+  {
+    id: 1, nombre: "Paciente WA Uno", telefono: "+54 9 353 400-1111", tipo: "TURNO", urgente: false, estado: "Nuevo",
+    mensajes: [
+      { texto: "Hola doctor, quería consultar si tiene turno para el jueves a la tarde", dir: "in", hora: "09:14" },
+      { texto: "Es para clínica general", dir: "in", hora: "09:14" },
+    ],
+  },
+  {
+    id: 2, nombre: "Paciente WA Dos", telefono: "+54 9 353 400-2222", tipo: "RECETA", urgente: true, estado: "Nuevo",
+    mensajes: [
+      { texto: "Buenas, se me terminó la medicación y no consigo turno hasta la semana que viene", dir: "in", hora: "08:02" },
+      { texto: "¿Podría renovarme la receta mientras tanto?", dir: "in", hora: "08:03" },
+    ],
+  },
+  {
+    id: 3, nombre: "Paciente WA Tres", telefono: "+54 9 353 400-3333", tipo: "CANCELACION", urgente: false, estado: "Resuelto",
+    mensajes: [
+      { texto: "Hola, no voy a poder ir mañana a las 10, ¿lo podemos pasar para la semana que viene?", dir: "in", hora: "ayer 18:20" },
+      { texto: "Sin problema, te reprogramamos. Te escribimos con el nuevo horario.", dir: "out", hora: "ayer 18:35" },
+    ],
+  },
+];
+let conversacionActiva = 1;
+let filtroActual = 'todos';
+
+function updateOutboxBadge() {
+  const sinResolver = conversaciones.filter(c => c.estado !== 'Resuelto').length;
+  document.getElementById('badge-sin-resolver').textContent = sinResolver > 0 ? `(${sinResolver})` : '';
+}
+
+function renderLista() {
+  const el = document.getElementById('lista-conversaciones');
+  let filtradas = conversaciones;
+  if (filtroActual === 'sin_resolver') filtradas = conversaciones.filter(c => c.estado !== 'Resuelto');
+  if (filtroActual === 'urgente') filtradas = conversaciones.filter(c => c.urgente);
+
+  el.innerHTML = filtradas.map(c => `
+    <div class="conv-item ${c.id === conversacionActiva ? 'active' : ''}" data-id="${c.id}">
+      <div class="meta-row">
+        <span class="name">${c.nombre}</span>
+        ${c.urgente ? '<span class="tag urgente">Urgente</span>' : ''}
+      </div>
+      <div class="preview">${c.mensajes[c.mensajes.length - 1].texto}</div>
+      <div class="meta-row">
+        <span class="tag ${c.estado === 'Resuelto' ? 'resuelto' : 'nuevo'}">${TIPO_LABEL[c.tipo]}</span>
+        <span class="time">${c.mensajes[c.mensajes.length - 1].hora}</span>
+      </div>
+    </div>
+  `).join('') || '<div class="empty">Sin conversaciones con este filtro.</div>';
+
+  el.querySelectorAll('.conv-item').forEach(item => {
+    item.addEventListener('click', () => {
+      conversacionActiva = parseInt(item.dataset.id, 10);
+      renderLista();
+      renderThread();
+    });
+  });
+  updateOutboxBadge();
+}
+
+function renderThread() {
+  const el = document.getElementById('zona-thread');
+  const c = conversaciones.find(x => x.id === conversacionActiva);
+  if (!c) { el.innerHTML = '<div class="empty">Elegí una conversación.</div>'; return; }
+
+  el.innerHTML = `
+    <div class="thread-header">
+      <div class="row-between">
+        <div>
+          <div style="font-weight:700; font-size:16px;">${c.nombre}</div>
+          <div style="font-size:12px; color:var(--muted);">${c.telefono}</div>
+        </div>
+        <div class="row">
+          <span class="tag ${c.estado === 'Resuelto' ? 'resuelto' : 'nuevo'}">${TIPO_LABEL[c.tipo]}</span>
+          ${c.urgente ? '<span class="tag urgente">Urgente</span>' : ''}
+        </div>
+      </div>
+    </div>
+    <div class="thread-msgs" id="thread-msgs">
+      ${c.mensajes.map(m => `
+        <div class="wa-msg ${m.dir}">
+          ${m.texto}
+          <div class="wa-time">${m.hora}</div>
+        </div>
+      `).join('')}
+    </div>
+    <div style="margin-top:var(--space-3); border-top:1px solid var(--border); padding-top:var(--space-3);">
+      ${esOperativa ? `
+        <div class="row-wrap">
+          <select id="estado-select" style="width:auto;">
+            <option ${c.estado === 'Nuevo' ? 'selected' : ''}>Nuevo</option>
+            <option ${c.estado === 'En proceso' ? 'selected' : ''}>En proceso</option>
+            <option ${c.estado === 'Resuelto' ? 'selected' : ''}>Resuelto</option>
+          </select>
+          <input type="text" id="respuesta-input" placeholder="Escribir respuesta..." style="flex:1;">
+          <button class="primary" id="btn-enviar">Enviar</button>
+        </div>
+      ` : `
+        <div class="help-text">Vista de Director: solo lectura de esta bandeja administrativa (igual que hoy con Marianela). Para responder, cambiá a la vista Operativa.</div>
+      `}
+    </div>
+  `;
+
+  if (esOperativa) {
+    document.getElementById('estado-select').addEventListener('change', (e) => {
+      c.estado = e.target.value;
+      renderLista();
+      showToast('Estado actualizado.', 'success');
+    });
+    document.getElementById('btn-enviar').addEventListener('click', () => {
+      const input = document.getElementById('respuesta-input');
+      const texto = input.value.trim();
+      if (!texto) return;
+      c.mensajes.push({ texto, dir: 'out', hora: 'ahora' });
+      input.value = '';
+      renderThread();
+      showToast('Mensaje enviado (mockup).', 'success');
+    });
+  }
+}
+
+document.querySelectorAll('[data-filter]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    filtroActual = btn.dataset.filter;
+    document.querySelectorAll('[data-filter]').forEach(b => b.classList.toggle('active', b === btn));
+    renderLista();
+  });
+});
+
+document.getElementById('btn-switch-role').addEventListener('click', (e) => {
+  esOperativa = !esOperativa;
+  document.getElementById('subtitle').textContent = esOperativa ? 'Operativa · WhatsApp Consultorio' : 'Director · WhatsApp Consultorio';
+  e.target.textContent = esOperativa ? 'Ver como Director' : 'Ver como Operativa';
+  renderThread();
+  showToast(esOperativa ? 'Ahora ves como Marianela (puede responder).' : 'Ahora ves como Director (solo lectura de esta bandeja).');
+});
+
+renderLista();
+renderThread();
+</script>
+</body>
+</html>

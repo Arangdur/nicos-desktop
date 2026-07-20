@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mockup — Alta de usuario/rol</title>
+<link rel="stylesheet" href="../renderer/shared/styles.css">
+<style>
+  .mockup-banner { background: #92400e; color: white; padding: 8px 24px; font-size: 12px; text-align: center; font-weight: 600; }
+  .persona-row { display: grid; grid-template-columns: 1fr 200px 140px 100px 90px; gap: var(--space-3); align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .persona-row:last-child { border-bottom: none; }
+  .persona-row .nombre { font-weight: 600; font-size: 14px; }
+  .persona-row .rol-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .persona-row .head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted-soft); font-weight: 600; }
+  .form-alta { display: none; }
+  .form-alta.open { display: block; }
+  .rol-card { border: 1px solid var(--border); border-radius: 10px; padding: var(--space-3); cursor: pointer; }
+  .rol-card.selected { border-color: var(--navy); background: var(--navy-soft); }
+  .rol-card .rol-nombre { font-weight: 700; font-size: 14px; }
+  .rol-card .rol-desc { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .rol-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-2); }
+  .permisos-box { background: var(--navy-soft); border-radius: 8px; padding: var(--space-3); margin-top: var(--space-3); font-size: 13px; }
+  .permisos-box ul { margin: 6px 0 0 18px; padding: 0; }
+  .permisos-box li { margin-bottom: 4px; }
+  .code-box { text-align: center; padding: var(--space-4); background: var(--navy-soft); border-radius: 10px; margin-top: var(--space-3); }
+  .code-box .code { font-size: 32px; font-weight: 700; letter-spacing: 4px; color: var(--navy); }
+</style>
+</head>
+<body>
+  <div class="mockup-banner">MOCKUP — flujo de alta de usuario/rol, sin conexión real al pairing ni a la base de datos.</div>
+  <div class="banner">
+    <div>
+      <div class="title">NicOS Desktop</div>
+      <div class="subtitle">Director · Ajustes — Personas y roles</div>
+    </div>
+    <span class="badge">conectado</span>
+  </div>
+
+  <div class="container">
+    <div class="tabs">
+      <button class="tab">Resumen</button>
+      <button class="tab">Tareas</button>
+      <button class="tab">Chat</button>
+      <button class="tab active">Ajustes</button>
+      <button class="tab">Acerca de</button>
+    </div>
+
+    <div class="card">
+      <div class="row-between">
+        <h3 style="margin-bottom:0;">Personas con acceso a NicOS</h3>
+        <button class="primary" id="btn-nueva-persona">+ Agregar persona</button>
+      </div>
+      <p class="help-text" style="margin-top:var(--space-2);">Cada persona vinculada tiene un rol fijo asignado en este paso — no se puede cambiar después sin revocar y volver a vincular.</p>
+
+      <div style="margin-top:var(--space-4);">
+        <div class="persona-row">
+          <div class="head">Persona</div>
+          <div class="head">Rol</div>
+          <div class="head">Vinculado</div>
+          <div class="head">Estado</div>
+          <div class="head"></div>
+        </div>
+        <div id="lista-personas"></div>
+      </div>
+    </div>
+
+    <div class="card form-alta" id="form-alta">
+      <h3>Agregar nueva persona</h3>
+
+      <label style="margin-top:var(--space-3);">Nombre completo</label>
+      <input type="text" id="input-nombre" placeholder="Ej. Carlos Fernández">
+
+      <label style="margin-top:var(--space-3);">Rol</label>
+      <div class="rol-grid">
+        <div class="rol-card" data-rol="operativa">
+          <div class="rol-nombre">Operativa (Secretaria)</div>
+          <div class="rol-desc">Entrada rápida de gastos/ingresos y bandeja de WhatsApp del consultorio. Sin acceso a datos clínicos.</div>
+        </div>
+        <div class="rol-card" data-rol="enfermero">
+          <div class="rol-nombre">Enfermero/a de Abate</div>
+          <div class="rol-desc">Carga novedades y administración de medicación de residentes. Sin procesamiento por IA — texto tal cual.</div>
+        </div>
+      </div>
+
+      <div id="campo-turno" style="display:none; margin-top:var(--space-3);">
+        <label>Turno habitual (opcional, informativo)</label>
+        <select id="input-turno">
+          <option value="">Sin especificar</option>
+          <option value="manana">Mañana</option>
+          <option value="tarde">Tarde</option>
+          <option value="noche">Noche</option>
+          <option value="rotativo">Rotativo</option>
+        </select>
+        <p class="help-text" style="margin-top:6px;">Hay continuidad de turno entre enfermeros — cualquiera con este rol ve las novedades cargadas por los demás, con el nombre de quién la escribió.</p>
+      </div>
+
+      <div class="permisos-box" id="permisos-preview" style="display:none;"></div>
+
+      <div class="row-wrap" style="margin-top:var(--space-4);">
+        <button class="primary" id="btn-generar-codigo">Generar código de vinculación</button>
+        <button class="secondary" id="btn-cancelar-alta">Cancelar</button>
+      </div>
+
+      <div class="code-box" id="code-box" style="display:none;">
+        <div class="code" id="code-value">000000</div>
+        <p class="help-text" style="margin-top:var(--space-2);">Válido 5 minutos. Decíselo a <span id="code-persona-nombre">la persona</span> para que lo escriba en la pantalla de vinculación de su PC.</p>
+      </div>
+    </div>
+  </div>
+
+<script src="../renderer/shared/ui-helpers.js"></script>
+<script>
+const ROL_LABEL = {
+  operativa: 'Operativa (Secretaria)',
+  enfermero: 'Enfermero/a de Abate',
+};
+
+const ROL_PERMISOS = {
+  operativa: [
+    'Puede: entrada rápida de gastos/ingresos, bandeja de WhatsApp del consultorio (leer y responder).',
+    'No puede: ver datos clínicos, aprobar sus propias tareas, ni vincular otros dispositivos.',
+  ],
+  enfermero: [
+    'Puede: cargar novedades (operativas, clínico-conductuales, administrativas) y tildar medicación administrada.',
+    'No puede: modificar el tratamiento farmacológico (solo el Director lo edita), ni usar IA sobre lo que escribe — se guarda tal cual.',
+    'Ve también lo cargado por otros enfermeros del mismo residente, con el nombre de quién lo escribió (continuidad de turno).',
+  ],
+};
+
+const SEXO_LABEL = { F: 'Femenino', M: 'Masculino', X: 'Otro', NC: 'Prefiere no decir' };
+
+function calcularEdad(fechaISO) {
+  if (!fechaISO) return null;
+  const hoy = new Date('2026-07-19'); // fecha fija de referencia para este mockup
+  const nacimiento = new Date(fechaISO);
+  let edad = hoy.getFullYear() - nacimiento.getFullYear();
+  const noCumplioAun = (hoy.getMonth() < nacimiento.getMonth()) ||
+    (hoy.getMonth() === nacimiento.getMonth() && hoy.getDate() < nacimiento.getDate());
+  if (noCumplioAun) edad -= 1;
+  return edad;
+}
+
+let personas = [
+  { nombre: 'Marianela', rol: 'operativa', vinculado: '15/6/2026', estado: 'Activo', dni: '32456789', nacimiento: '1988-03-22', sexo: 'F' },
+  { nombre: 'Carlos', rol: 'enfermero', turno: 'manana', vinculado: '2/7/2026', estado: 'Activo', dni: '30123456', nacimiento: '1990-08-12', sexo: 'M' },
+  { nombre: 'María', rol: 'enfermero', turno: 'noche', vinculado: '2/7/2026', estado: 'Activo', dni: '35789123', nacimiento: '1995-11-04', sexo: 'F' },
+];
+
+let rolSeleccionado = null;
+
+function renderLista() {
+  const el = document.getElementById('lista-personas');
+  el.innerHTML = personas.map(p => {
+    const tieneFicha = p.dni && p.nacimiento && p.sexo;
+    const edad = tieneFicha ? calcularEdad(p.nacimiento) : null;
+    return `
+    <div class="persona-row">
+      <div>
+        <div class="nombre">${p.nombre}</div>
+        ${p.turno ? `<div class="rol-sub">Turno ${{'manana':'mañana','tarde':'tarde','noche':'noche','rotativo':'rotativo'}[p.turno]}</div>` : ''}
+        ${tieneFicha
+          ? `<div class="rol-sub">DNI ${p.dni} · ${edad} años · ${SEXO_LABEL[p.sexo]}</div>`
+          : `<div class="rol-sub" style="font-style:italic;">Datos personales pendientes — los completa la persona al hacer su alta</div>`}
+      </div>
+      <div>${ROL_LABEL[p.rol]}</div>
+      <div style="font-size:13px; color:var(--muted);">${p.vinculado}</div>
+      <div><span class="tag resuelto">${p.estado}</span></div>
+      <div><button class="secondary" data-revocar="${p.nombre}" style="padding:6px 10px; font-size:12px;">Revocar</button></div>
+    </div>
+  `;
+  }).join('');
+
+  el.querySelectorAll('[data-revocar]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const nombre = btn.dataset.revocar;
+      const ok = await showConfirm('Revocar acceso', `${nombre} va a perder el acceso a NicOS de inmediato. Va a necesitar un código nuevo para volver a vincularse.`, { confirmLabel: 'Revocar', danger: true });
+      if (!ok) return;
+      personas = personas.map(p => p.nombre === nombre ? { ...p, estado: 'Revocado' } : p);
+      renderLista();
+      showToast(`Acceso de ${nombre} revocado (mockup).`);
+    });
+  });
+}
+
+document.getElementById('btn-nueva-persona').addEventListener('click', () => {
+  document.getElementById('form-alta').classList.add('open');
+  document.getElementById('form-alta').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+document.getElementById('btn-cancelar-alta').addEventListener('click', () => {
+  document.getElementById('form-alta').classList.remove('open');
+  document.getElementById('code-box').style.display = 'none';
+  document.getElementById('input-nombre').value = '';
+  rolSeleccionado = null;
+  document.querySelectorAll('.rol-card').forEach(c => c.classList.remove('selected'));
+  document.getElementById('permisos-preview').style.display = 'none';
+  document.getElementById('campo-turno').style.display = 'none';
+});
+
+document.querySelectorAll('.rol-card').forEach(card => {
+  card.addEventListener('click', () => {
+    rolSeleccionado = card.dataset.rol;
+    document.querySelectorAll('.rol-card').forEach(c => c.classList.toggle('selected', c === card));
+    document.getElementById('campo-turno').style.display = rolSeleccionado === 'enfermero' ? 'block' : 'none';
+    const box = document.getElementById('permisos-preview');
+    box.style.display = 'block';
+    box.innerHTML = `<b>${ROL_LABEL[rolSeleccionado]} puede/no puede:</b><ul>${ROL_PERMISOS[rolSeleccionado].map(p => `<li>${p}</li>`).join('')}</ul>`;
+  });
+});
+
+document.getElementById('btn-generar-codigo').addEventListener('click', () => {
+  const nombre = document.getElementById('input-nombre').value.trim();
+  if (!nombre) { showToast('Falta el nombre.', 'error'); return; }
+  if (!rolSeleccionado) { showToast('Elegí un rol.', 'error'); return; }
+
+  const codigo = Math.floor(100000 + 537219 % 900000).toString();
+  document.getElementById('code-value').textContent = codigo;
+  document.getElementById('code-persona-nombre').textContent = nombre;
+  document.getElementById('code-box').style.display = 'block';
+
+  const turno = document.getElementById('input-turno').value;
+  personas.push({ nombre, rol: rolSeleccionado, turno: turno || undefined, vinculado: 'Pendiente de vincular', estado: 'Código generado' });
+  renderLista();
+  showToast('Código generado (mockup) — el rol ya quedó asignado a este código.', 'success');
+});
+
+renderLista();
+</script>
+</body>
+</html>

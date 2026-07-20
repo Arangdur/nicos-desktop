@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mockup — Inicio: alta y login</title>
+<link rel="stylesheet" href="../renderer/shared/styles.css">
+<style>
+  .mockup-banner { background: #92400e; color: white; padding: 8px 24px; font-size: 12px; text-align: center; font-weight: 600; }
+  .welcome-wrap { max-width: 480px; margin: 0 auto; padding: 60px 20px; }
+  .welcome-logo { text-align: center; margin-bottom: var(--space-5); }
+  .welcome-logo .title { font-size: 22px; font-weight: 700; }
+  .welcome-logo .subtitle { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .switch-row { display: flex; gap: 4px; background: var(--navy-soft); border-radius: 10px; padding: 4px; margin-bottom: var(--space-4); }
+  .switch-btn { flex: 1; padding: 10px; text-align: center; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; color: var(--muted); }
+  .switch-btn.active { background: white; color: var(--navy); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .persona-pick { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; margin-bottom: 8px; }
+  .persona-pick:hover { border-color: var(--navy); }
+  .persona-pick.selected { border-color: var(--navy); background: var(--navy-soft); }
+  .avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--navy); color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+  .persona-pick .p-nombre { font-weight: 600; font-size: 14px; }
+  .persona-pick .p-rol { font-size: 12px; color: var(--muted); }
+  .pin-pad { display: flex; gap: 10px; justify-content: center; margin: var(--space-4) 0; }
+  .pin-dot { width: 44px; height: 52px; border: 1px solid var(--border); border-radius: 8px; text-align: center; font-size: 22px; }
+  .panel { display: none; }
+  .panel.open { display: block; }
+  .otra-persona-link { text-align: center; font-size: 13px; color: var(--muted); margin-top: var(--space-3); cursor: pointer; text-decoration: underline; }
+</style>
+</head>
+<body style="background: var(--bg-page);">
+  <div class="mockup-banner">MOCKUP — pantalla de inicio de la app (alta + login), sin conexión real a la base de datos.</div>
+
+  <div class="welcome-wrap">
+    <div class="welcome-logo">
+      <div class="title">NicOS Desktop</div>
+      <div class="subtitle">Centralizador de Nicolás Buso — consultorio, Abate, finanzas y más</div>
+    </div>
+
+    <div class="switch-row">
+      <div class="switch-btn active" data-panel="login">Ya tengo cuenta</div>
+      <div class="switch-btn" data-panel="alta">Soy nuevo — tengo un código</div>
+    </div>
+
+    <!-- LOGIN -->
+    <div class="card panel open" id="panel-login">
+      <h3 style="margin-bottom:4px;">¿Quién sos?</h3>
+      <p class="help-text" style="margin-bottom:var(--space-3);">Esta PC ya tiene gente vinculada. Elegí tu nombre para continuar.</p>
+
+      <div id="lista-personas-login"></div>
+
+      <div class="otra-persona-link" id="link-otra-persona">Mi nombre no está en la lista</div>
+    </div>
+
+    <!-- PIN -->
+    <div class="card panel" id="panel-pin">
+      <button class="secondary" id="btn-volver-login" style="padding:6px 10px; font-size:12px; margin-bottom:var(--space-3);">&larr; Volver</button>
+      <h3 id="pin-nombre" style="margin-bottom:4px;">Hola, Carlos</h3>
+      <p class="help-text" style="margin-bottom:var(--space-3);">Ingresá tu PIN de 4 dígitos para confirmar que sos vos (no es una contraseña de seguridad, solo evita que se cargue algo a nombre de otro turno).</p>
+      <div class="pin-pad">
+        <div class="pin-dot"></div>
+        <div class="pin-dot"></div>
+        <div class="pin-dot"></div>
+        <div class="pin-dot"></div>
+      </div>
+      <input type="password" id="pin-input" maxlength="4" placeholder="····" style="text-align:center; letter-spacing:8px; font-size:20px; max-width:200px; margin:0 auto; display:block;">
+      <button class="primary" id="btn-entrar" style="width:100%; margin-top:var(--space-4);">Entrar</button>
+    </div>
+
+    <!-- ALTA -->
+    <div class="card panel" id="panel-alta">
+      <h3 style="margin-bottom:4px;">Alta con código</h3>
+      <p class="help-text" style="margin-bottom:var(--space-3);">Nicolás te tiene que haber dado un código de 6 dígitos (válido 5 minutos) y la IP de su Mac. Si no lo tenés, pedíselo antes de seguir.</p>
+
+      <label>Tu nombre completo</label>
+      <input type="text" id="alta-nombre" placeholder="Ej. Daniela Fernández">
+
+      <label style="margin-top:var(--space-3);">DNI</label>
+      <input type="text" id="alta-dni" placeholder="Ej. 30123456" inputmode="numeric">
+
+      <div class="row-wrap" style="margin-top:var(--space-3); align-items:flex-end;">
+        <div style="flex:1;">
+          <label>Fecha de nacimiento</label>
+          <input type="date" id="alta-nacimiento">
+        </div>
+        <div style="width:110px;">
+          <label>Edad</label>
+          <input type="text" id="alta-edad" disabled placeholder="—">
+        </div>
+      </div>
+
+      <label style="margin-top:var(--space-3);">Sexo</label>
+      <select id="alta-sexo">
+        <option value="">Elegí una opción</option>
+        <option value="F">Femenino</option>
+        <option value="M">Masculino</option>
+        <option value="X">Otro</option>
+        <option value="NC">Prefiero no decir</option>
+      </select>
+
+      <label style="margin-top:var(--space-3);">Código de 6 dígitos</label>
+      <input type="text" id="alta-codigo" placeholder="000000" maxlength="6">
+
+      <label style="margin-top:var(--space-3);">IP de Tailscale de la Mac de Nicolás</label>
+      <input type="text" id="alta-ip" placeholder="100.x.y.z">
+
+      <div id="alta-status" style="margin-top:var(--space-3); font-size:13px;"></div>
+
+      <button class="primary" id="btn-completar-alta" style="width:100%; margin-top:var(--space-4);">Completar alta</button>
+      <p class="help-text" style="margin-top:var(--space-3);">Tu rol y qué podés ver ya quedaron definidos por Nicolás al generar este código — no elegís vos acá.</p>
+    </div>
+  </div>
+
+<script src="../renderer/shared/ui-helpers.js"></script>
+<script>
+const PERSONAS_CONOCIDAS = [
+  { nombre: 'Carlos', rol: 'Enfermero — turno mañana', pin: '1234' },
+  { nombre: 'María', rol: 'Enfermero — turno noche', pin: '5678' },
+];
+
+let personaEligiendo = null;
+
+function renderListaLogin() {
+  const el = document.getElementById('lista-personas-login');
+  el.innerHTML = PERSONAS_CONOCIDAS.map(p => `
+    <div class="persona-pick" data-nombre="${p.nombre}">
+      <div class="avatar">${p.nombre[0]}</div>
+      <div>
+        <div class="p-nombre">${p.nombre}</div>
+        <div class="p-rol">${p.rol}</div>
+      </div>
+    </div>
+  `).join('');
+
+  el.querySelectorAll('.persona-pick').forEach(item => {
+    item.addEventListener('click', () => {
+      personaEligiendo = PERSONAS_CONOCIDAS.find(p => p.nombre === item.dataset.nombre);
+      mostrarPanel('pin');
+      document.getElementById('pin-nombre').textContent = `Hola, ${personaEligiendo.nombre}`;
+      document.getElementById('pin-input').value = '';
+    });
+  });
+}
+
+function mostrarPanel(nombre) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('open'));
+  document.getElementById('panel-' + nombre).classList.add('open');
+}
+
+document.querySelectorAll('.switch-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.switch-btn').forEach(b => b.classList.toggle('active', b === btn));
+    mostrarPanel(btn.dataset.panel);
+  });
+});
+
+document.getElementById('link-otra-persona').addEventListener('click', () => {
+  document.querySelectorAll('.switch-btn').forEach(b => b.classList.toggle('active', b.dataset.panel === 'alta'));
+  mostrarPanel('alta');
+  showToast('Si sos nuevo, necesitás un código de Nicolás primero.');
+});
+
+document.getElementById('btn-volver-login').addEventListener('click', () => {
+  document.querySelectorAll('.switch-btn').forEach(b => b.classList.toggle('active', b.dataset.panel === 'login'));
+  mostrarPanel('login');
+});
+
+document.getElementById('btn-entrar').addEventListener('click', () => {
+  const pin = document.getElementById('pin-input').value.trim();
+  if (!personaEligiendo) return;
+  if (pin !== personaEligiendo.pin) {
+    showToast('PIN incorrecto (mockup: probá 1234 para Carlos o 5678 para María).', 'error');
+    return;
+  }
+  showToast(`Entrando como ${personaEligiendo.nombre}... (mockup)`, 'success');
+});
+
+function calcularEdad(fechaISO) {
+  if (!fechaISO) return null;
+  const hoy = new Date('2026-07-19'); // fecha fija de referencia para este mockup
+  const nacimiento = new Date(fechaISO);
+  let edad = hoy.getFullYear() - nacimiento.getFullYear();
+  const noCumplioAun = (hoy.getMonth() < nacimiento.getMonth()) ||
+    (hoy.getMonth() === nacimiento.getMonth() && hoy.getDate() < nacimiento.getDate());
+  if (noCumplioAun) edad -= 1;
+  return edad;
+}
+
+document.getElementById('alta-nacimiento').addEventListener('change', (e) => {
+  const edad = calcularEdad(e.target.value);
+  document.getElementById('alta-edad').value = edad === null ? '' : `${edad} años`;
+});
+
+document.getElementById('btn-completar-alta').addEventListener('click', () => {
+  const nombre = document.getElementById('alta-nombre').value.trim();
+  const dni = document.getElementById('alta-dni').value.trim();
+  const nacimiento = document.getElementById('alta-nacimiento').value;
+  const sexo = document.getElementById('alta-sexo').value;
+  const codigo = document.getElementById('alta-codigo').value.trim();
+  const ip = document.getElementById('alta-ip').value.trim();
+  const statusEl = document.getElementById('alta-status');
+
+  if (!nombre || !dni || !nacimiento || !sexo || !codigo || !ip) {
+    statusEl.textContent = 'Completá todos los campos.';
+    statusEl.style.color = 'var(--red)';
+    return;
+  }
+  statusEl.textContent = `Cuenta creada. Ya podés elegir tu PIN y entrar (mockup) — bienvenida/o, ${nombre}.`;
+  statusEl.style.color = 'var(--green)';
+  showToast('Alta completada (mockup).', 'success');
+});
+
+renderListaLogin();
+</script>
+</body>
+</html>

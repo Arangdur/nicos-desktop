@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mockup — Novedades de Enfermería (Abate)</title>
+<link rel="stylesheet" href="../renderer/shared/styles.css">
+<style>
+  .mockup-banner { background: #92400e; color: white; padding: 8px 24px; font-size: 12px; text-align: center; font-weight: 600; }
+  .novedad-item { border-left: 2px solid var(--border); padding: 0 0 16px 16px; position: relative; }
+  .novedad-item::before { content: ""; position: absolute; left: -5px; top: 3px; width: 8px; height: 8px; border-radius: 50%; border: 2px solid white; }
+  .novedad-item.operativo::before { background: var(--blue); }
+  .novedad-item.clinico::before { background: var(--amber); }
+  .novedad-item.administrativo::before { background: var(--muted-soft); }
+  .novedad-meta { font-size: 12px; color: var(--muted); }
+  .novedad-text { font-size: 14px; margin-top: 4px; }
+  .cat-picker { display: flex; gap: 8px; margin: var(--space-2) 0 var(--space-3) 0; }
+  .cat-btn { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: white; cursor: pointer; font-size: 13px; text-align: center; font-weight: 600; }
+  .cat-btn.selected.operativo { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); }
+  .cat-btn.selected.clinico { background: var(--amber-bg); border-color: var(--amber); color: var(--amber); }
+  .cat-btn.selected.administrativo { background: var(--navy-soft); border-color: var(--navy); color: var(--navy); }
+  .residente-card { padding: 12px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 8px; cursor: pointer; }
+  .residente-card:hover { background: var(--navy-soft); }
+  .med-row { padding: var(--space-3) 0; border-bottom: 1px solid var(--border-soft); }
+  .med-row:last-child { border-bottom: none; }
+  .med-nombre { font-weight: 700; font-size: 15px; }
+  .med-dosis { font-size: 13px; color: var(--muted); margin-left: 6px; }
+  .horario-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: var(--space-2); }
+  .horario-chip { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; cursor: pointer; font-size: 13px; text-align: center; min-width: 84px; background: white; }
+  .horario-chip .hora { font-weight: 700; display: block; }
+  .horario-chip .estado { font-size: 11px; color: var(--muted); display: block; margin-top: 2px; }
+  .horario-chip.dado { background: var(--green-bg); border-color: var(--green); }
+  .horario-chip.dado .estado { color: var(--green); }
+  .horario-chip.pendiente-vencido { background: var(--red-bg); border-color: #f3c6c6; }
+  .horario-chip.pendiente-vencido .estado { color: var(--red); }
+</style>
+</head>
+<body>
+  <div class="mockup-banner">MOCKUP — datos de prueba, sin conexión real. Residente ficticio, para validar la idea.</div>
+  <div class="banner">
+    <div>
+      <div class="title">NicOS Desktop</div>
+      <div class="subtitle">Enfermería · Fundación Abate — María (turno tarde)</div>
+    </div>
+    <span class="badge">conectado</span>
+  </div>
+
+  <div class="container">
+    <div class="tabs">
+      <button class="tab active" data-tab="novedades">Novedades</button>
+      <button class="tab" data-tab="residentes">Residentes</button>
+      <button class="tab" data-tab="ajustes">Ajustes</button>
+    </div>
+
+    <div id="tab-novedades">
+      <div class="card">
+        <h3>Reportar novedad</h3>
+        <label>Residente</label>
+        <select id="residente-select">
+          <option>Residente Demo A</option>
+          <option>Residente Demo B</option>
+          <option>Residente Demo C</option>
+        </select>
+        <label>Tipo de novedad</label>
+        <div class="cat-picker">
+          <div class="cat-btn operativo" data-cat="operativo">Operativo<br><span style="font-weight:400; font-size:11px;">medicación, comidas, actividades</span></div>
+          <div class="cat-btn clinico" data-cat="clinico">Clínico-conductual<br><span style="font-weight:400; font-size:11px;">ánimo, síntomas, crisis</span></div>
+          <div class="cat-btn administrativo" data-cat="administrativo">Administrativo<br><span style="font-weight:400; font-size:11px;">visitas, asistencia</span></div>
+        </div>
+        <label>Detalle</label>
+        <textarea id="detalle-input" rows="3" placeholder="Describí la novedad..."></textarea>
+        <div class="row-wrap" style="margin-top:var(--space-3);">
+          <button class="primary" id="btn-reportar">Reportar</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-between" style="margin-bottom:var(--space-3);">
+          <h3 style="margin-bottom:0;" id="novedades-titulo">Novedades recientes — todos los turnos</h3>
+          <span style="font-size:12px; color:var(--muted);" id="novedades-subtitulo">Continuidad de turno: ves lo que reportaron tus compañeros</span>
+        </div>
+        <div id="lista-novedades"></div>
+      </div>
+    </div>
+
+    <div id="tab-residentes" style="display:none;">
+      <div id="residentes-lista-zona">
+        <div class="card">
+          <h3>Residentes</h3>
+          <p class="help-text" style="margin-bottom:var(--space-3);">Elegí un residente para ver su tratamiento, indicaciones y novedades.</p>
+          <div id="lista-residentes"></div>
+        </div>
+      </div>
+
+      <div id="residente-detalle-zona" style="display:none;">
+        <button class="link" id="btn-volver-residentes" style="margin-bottom:var(--space-3);">← Volver a Residentes</button>
+
+        <div class="card">
+          <h3 id="detalle-nombre"></h3>
+          <p class="help-text" id="detalle-fecha"></p>
+        </div>
+
+        <div class="card">
+          <h3>Tratamiento farmacológico — hoy</h3>
+          <p class="help-text" style="margin-bottom:var(--space-3);">Tildá cada toma cuando la administrés. Queda registrado con tu nombre y la hora real.</p>
+          <div id="medicacion-zona"></div>
+        </div>
+
+        <div class="card">
+          <h3>Indicaciones y notas terapéuticas</h3>
+          <textarea id="indicaciones-textarea" rows="4" placeholder="Sin indicaciones cargadas todavía..."></textarea>
+          <div class="row-wrap" style="margin-top:var(--space-3);">
+            <button class="primary" id="btn-guardar-indicaciones">Guardar</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Novedades de este residente</h3>
+          <div id="detalle-novedades"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-ajustes" style="display:none;">
+      <div class="card">
+        <h3>Tu dispositivo</h3>
+        <dl class="kv-grid">
+          <dt>Enfermero/a</dt><dd>María</dd>
+          <dt>Vinculación</dt><dd>Individual, por Tailscale (mismo mecanismo que Marianela)</dd>
+        </dl>
+        <button class="danger" style="margin-top:var(--space-4);">Olvidar vinculación</button>
+      </div>
+    </div>
+  </div>
+
+<script src="../renderer/shared/ui-helpers.js"></script>
+<script>
+const CAT_LABEL = { operativo: 'Operativo', clinico: 'Clínico-conductual', administrativo: 'Administrativo' };
+
+let novedades = [
+  { residente: "Residente Demo A", categoria: "clinico", texto: "Ánimo decaído durante la tarde, refiere mala noche. Se conversó, sin ideación de riesgo. Se avisa a guardia.", autor: "Carlos (turno mañana)", hora: "hoy, 08:40" },
+  { residente: "Residente Demo B", categoria: "operativo", texto: "Medicación de las 12hs administrada sin inconvenientes. Almorzó completo.", autor: "Carlos (turno mañana)", hora: "hoy, 12:15" },
+  { residente: "Residente Demo C", categoria: "administrativo", texto: "Visita de la madre, se retiró a las 11:30. Sin novedades.", autor: "Carlos (turno mañana)", hora: "hoy, 11:35" },
+];
+
+let categoriaSeleccionada = null;
+let residenteFiltro = null;
+let residenteDetalleActivo = null;
+const RESIDENTES = ["Residente Demo A", "Residente Demo B", "Residente Demo C"];
+
+// Tratamiento farmacológico -- carga inicial (la haría vos, no el enfermero;
+// el enfermero solo tilda tomas y agrega novedades, nunca cambia dosis/droga).
+const TRATAMIENTOS = {
+  "Residente Demo A": {
+    indicaciones: "Administrar con las comidas. Controlar tensión arterial antes de la dosis de la mañana. Ante rechazo de medicación, no insistir -- registrar como novedad clínico-conductual y avisar a guardia.",
+    medicacion: [
+      { droga: "Clonazepam", dosis: "0.5mg", horarios: ["08:00", "20:00"] },
+      { droga: "Quetiapina", dosis: "100mg", horarios: ["22:00"] },
+      { droga: "Ácido Valproico", dosis: "500mg", horarios: ["08:00", "14:00", "22:00"] },
+    ],
+  },
+  "Residente Demo B": {
+    indicaciones: "Sin restricciones alimentarias asociadas a la medicación.",
+    medicacion: [
+      { droga: "Sertralina", dosis: "50mg", horarios: ["08:00"] },
+      { droga: "Clonazepam", dosis: "0.25mg", horarios: ["08:00", "20:00"] },
+    ],
+  },
+  "Residente Demo C": {
+    indicaciones: "",
+    medicacion: [
+      { droga: "Risperidona", dosis: "2mg", horarios: ["08:00", "20:00"] },
+    ],
+  },
+};
+
+// Estado de administración de hoy -- clave: "residente|droga|horario". Ya viene
+// con las tomas de la mañana marcadas por el turno anterior, para mostrar
+// cómo se ve la continuidad de turno acá también.
+let administraciones = {
+  "Residente Demo A|Clonazepam|08:00": { dado: true, por: "Carlos (turno mañana)", hora: "08:05" },
+  "Residente Demo A|Ácido Valproico|08:00": { dado: true, por: "Carlos (turno mañana)", hora: "08:05" },
+  "Residente Demo B|Sertralina|08:00": { dado: true, por: "Carlos (turno mañana)", hora: "08:10" },
+  "Residente Demo B|Clonazepam|08:00": { dado: true, por: "Carlos (turno mañana)", hora: "08:10" },
+  "Residente Demo C|Risperidona|08:00": { dado: true, por: "Carlos (turno mañana)", hora: "08:15" },
+};
+
+function renderNovedades() {
+  const el = document.getElementById('lista-novedades');
+  const filtradas = residenteFiltro ? novedades.filter(n => n.residente === residenteFiltro) : novedades;
+  document.getElementById('novedades-titulo').textContent = residenteFiltro ? `Novedades — ${residenteFiltro}` : 'Novedades recientes — todos los turnos';
+  document.getElementById('novedades-subtitulo').innerHTML = residenteFiltro
+    ? `<button class="link" id="btn-quitar-filtro">Ver todos los residentes</button>`
+    : 'Continuidad de turno: ves lo que reportaron tus compañeros';
+  el.innerHTML = filtradas.map(n => `
+    <div class="novedad-item ${n.categoria}">
+      <div class="novedad-meta">
+        <span class="tag ${n.categoria === 'clinico' ? 'proceso' : n.categoria === 'operativo' ? 'info' : ''}" style="margin-right:6px;">${CAT_LABEL[n.categoria]}</span>
+        ${n.residente} · ${n.autor} · ${n.hora}
+      </div>
+      <div class="novedad-text">${n.texto}</div>
+    </div>
+  `).join('') || '<div class="empty">Sin novedades para este residente todavía.</div>';
+
+  const btnQuitar = document.getElementById('btn-quitar-filtro');
+  if (btnQuitar) btnQuitar.addEventListener('click', () => { residenteFiltro = null; renderNovedades(); });
+}
+
+function renderResidentes() {
+  document.getElementById('residentes-lista-zona').style.display = 'block';
+  document.getElementById('residente-detalle-zona').style.display = 'none';
+  const el = document.getElementById('lista-residentes');
+  el.innerHTML = RESIDENTES.map(r => {
+    const count = novedades.filter(n => n.residente === r).length;
+    const trat = TRATAMIENTOS[r];
+    const pendientesHoy = trat.medicacion.reduce((acc, m) => acc + m.horarios.filter(h => !administraciones[`${r}|${m.droga}|${h}`]?.dado).length, 0);
+    return `
+      <div class="residente-card" data-residente="${r}">
+        <div class="row-between">
+          <b>${r}</b>
+          <div class="row">
+            ${pendientesHoy > 0 ? `<span class="tag nuevo">${pendientesHoy} toma${pendientesHoy === 1 ? '' : 's'} pendiente${pendientesHoy === 1 ? '' : 's'}</span>` : `<span class="tag resuelto">Medicación al día</span>`}
+            <span class="tag proceso">${count} novedad${count === 1 ? '' : 'es'}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  el.querySelectorAll('.residente-card').forEach(card => {
+    card.addEventListener('click', () => abrirDetalleResidente(card.dataset.residente));
+  });
+}
+
+function horarioVencido(horario) {
+  const [h, m] = horario.split(':').map(Number);
+  const ahora = new Date();
+  return (h * 60 + m) < (ahora.getHours() * 60 + ahora.getMinutes());
+}
+
+function renderMedicacion() {
+  const el = document.getElementById('medicacion-zona');
+  const trat = TRATAMIENTOS[residenteDetalleActivo];
+  el.innerHTML = trat.medicacion.map(m => `
+    <div class="med-row">
+      <span class="med-nombre">${m.droga}</span><span class="med-dosis">${m.dosis}</span>
+      <div class="horario-row">
+        ${m.horarios.map(h => {
+          const key = `${residenteDetalleActivo}|${m.droga}|${h}`;
+          const registro = administraciones[key];
+          const vencido = !registro && horarioVencido(h);
+          return `
+            <div class="horario-chip ${registro ? 'dado' : vencido ? 'pendiente-vencido' : ''}" data-key="${key}">
+              <span class="hora">${h}</span>
+              <span class="estado">${registro ? `✓ ${registro.por.split(' ')[0]} ${registro.hora}` : vencido ? 'Atrasada' : 'Pendiente'}</span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `).join('');
+
+  el.querySelectorAll('.horario-chip').forEach(chip => {
+    chip.addEventListener('click', async () => {
+      const key = chip.dataset.key;
+      if (administraciones[key]) {
+        showToast('Esta toma ya está registrada como administrada.');
+        return;
+      }
+      const [, droga, horario] = key.split('|');
+      const ok = await showConfirm('Confirmar administración', `${droga} · ${horario} · ${residenteDetalleActivo}`, { confirmLabel: 'Confirmar' });
+      if (!ok) return;
+      administraciones[key] = { dado: true, por: 'María (turno tarde) · vos', hora: 'ahora' };
+      renderMedicacion();
+      showToast('Toma registrada.', 'success');
+    });
+  });
+}
+
+function abrirDetalleResidente(residente) {
+  residenteDetalleActivo = residente;
+  document.getElementById('residentes-lista-zona').style.display = 'none';
+  document.getElementById('residente-detalle-zona').style.display = 'block';
+  document.getElementById('detalle-nombre').textContent = residente;
+  document.getElementById('detalle-fecha').textContent = `19/7/2026 · turno tarde`;
+  document.getElementById('indicaciones-textarea').value = TRATAMIENTOS[residente].indicaciones || '';
+  renderMedicacion();
+  renderDetalleNovedades();
+}
+
+function renderDetalleNovedades() {
+  const el = document.getElementById('detalle-novedades');
+  const filtradas = novedades.filter(n => n.residente === residenteDetalleActivo);
+  el.innerHTML = filtradas.map(n => `
+    <div class="novedad-item ${n.categoria}">
+      <div class="novedad-meta">
+        <span class="tag ${n.categoria === 'clinico' ? 'proceso' : n.categoria === 'operativo' ? 'info' : ''}" style="margin-right:6px;">${CAT_LABEL[n.categoria]}</span>
+        ${n.autor} · ${n.hora}
+      </div>
+      <div class="novedad-text">${n.texto}</div>
+    </div>
+  `).join('') || '<div class="empty">Sin novedades para este residente todavía.</div>';
+}
+
+document.querySelectorAll('[data-tab]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('active', b === btn));
+    document.getElementById('tab-novedades').style.display = btn.dataset.tab === 'novedades' ? 'block' : 'none';
+    document.getElementById('tab-residentes').style.display = btn.dataset.tab === 'residentes' ? 'block' : 'none';
+    document.getElementById('tab-ajustes').style.display = btn.dataset.tab === 'ajustes' ? 'block' : 'none';
+    if (btn.dataset.tab === 'residentes') renderResidentes();
+  });
+});
+
+document.querySelectorAll('.cat-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    categoriaSeleccionada = btn.dataset.cat;
+    document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+  });
+});
+
+document.getElementById('btn-reportar').addEventListener('click', () => {
+  const residente = document.getElementById('residente-select').value;
+  const texto = document.getElementById('detalle-input').value.trim();
+  if (!categoriaSeleccionada) { showToast('Elegí un tipo de novedad.', 'error'); return; }
+  if (!texto) { showToast('Escribí el detalle de la novedad.', 'error'); return; }
+  novedades.unshift({ residente, categoria: categoriaSeleccionada, texto, autor: "María (turno tarde) · vos", hora: "ahora" });
+  document.getElementById('detalle-input').value = '';
+  categoriaSeleccionada = null;
+  document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('selected'));
+  renderNovedades();
+  showToast('Novedad reportada.', 'success');
+});
+
+document.getElementById('btn-volver-residentes').addEventListener('click', () => {
+  residenteDetalleActivo = null;
+  renderResidentes();
+});
+
+document.getElementById('btn-guardar-indicaciones').addEventListener('click', () => {
+  TRATAMIENTOS[residenteDetalleActivo].indicaciones = document.getElementById('indicaciones-textarea').value;
+  showToast('Indicaciones actualizadas.', 'success');
+});
+
+renderNovedades();
+</script>
+</body>
+</html>

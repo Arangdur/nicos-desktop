@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mockup — Finanzas / Patrimonio</title>
+<link rel="stylesheet" href="../renderer/shared/styles.css">
+<style>
+  .mockup-banner { background: #92400e; color: white; padding: 8px 24px; font-size: 12px; text-align: center; font-weight: 600; }
+  .patrimonio-hero { text-align: center; padding: var(--space-5) 0; }
+  .patrimonio-hero .monto { font-size: 40px; font-weight: 700; color: var(--text); }
+  .patrimonio-hero .label { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+  .bar-row { display: flex; align-items: center; gap: var(--space-3); padding: 8px 0; }
+  .bar-label { width: 140px; font-size: 13px; flex-shrink: 0; }
+  .bar-track { flex: 1; height: 10px; background: var(--border-soft); border-radius: 999px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 999px; }
+  .bar-value { width: 110px; text-align: right; font-size: 13px; font-weight: 600; flex-shrink: 0; }
+</style>
+</head>
+<body>
+  <div class="mockup-banner">MOCKUP — cifras de ejemplo, sin conexión real al export de CFO_Nico_*.json.</div>
+  <div class="banner">
+    <div>
+      <div class="title">NicOS Desktop</div>
+      <div class="subtitle">Director · Finanzas — Patrimonio</div>
+    </div>
+    <span class="badge">conectado</span>
+  </div>
+
+  <div class="container">
+    <div class="tabs">
+      <button class="tab">Resumen</button>
+      <button class="tab">CFO</button>
+      <button class="tab active">Patrimonio</button>
+      <button class="tab">Abate</button>
+      <button class="tab">Ajustes</button>
+    </div>
+
+    <div class="card">
+      <div class="row-between">
+        <h3 style="margin-bottom:0;">Fuente de este dato</h3>
+      </div>
+      <p class="help-text" style="margin-top:var(--space-2);">
+        Este panel es <b>de solo lectura</b>. Viene de un export que vos mismo generás periódicamente (<code>CFO_Nico_*.json</code>) — NicOS nunca lo edita ni lo calcula. Es un dato distinto y complementario a los movimientos de <code>foto_financiera_*.md</code> (ese sí lo edita NicOS con cada gasto/ingreso que cargás).
+      </p>
+      <div class="row-wrap" style="margin-top:var(--space-3);">
+        <span class="tag proceso">Última actualización: 22/06/2026</span>
+        <button class="secondary" id="btn-importar">Importar nuevo export</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="patrimonio-hero">
+        <div class="monto">USD 229.625</div>
+        <div class="label">Patrimonio neto total</div>
+      </div>
+      <div class="metric-grid">
+        <div class="metric"><div class="metric-label">Cartera financiera</div><div class="metric-value">USD 19.875</div></div>
+        <div class="metric"><div class="metric-label">Liquidez</div><div class="metric-value">USD 8.059</div></div>
+        <div class="metric"><div class="metric-label">Inmuebles (neto de hipoteca)</div><div class="metric-value">USD 201.691</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Composición de cartera</h3>
+      <div id="composicion-zona"></div>
+    </div>
+
+    <div class="card">
+      <h3>Flujo del mes (referencia, no editable acá)</h3>
+      <p class="help-text" style="margin-bottom:var(--space-3);">Para cargar un movimiento nuevo, usá la pestaña CFO — eso sí actualiza <code>foto_financiera_*.md</code> en tiempo real.</p>
+      <div class="metric-grid">
+        <div class="metric"><div class="metric-label">Ingresos del mes</div><div class="metric-value" style="color:var(--green);">$7.235.607</div></div>
+        <div class="metric"><div class="metric-label">Gastos fijos cargados</div><div class="metric-value" style="color:var(--red);">$300.000</div></div>
+      </div>
+    </div>
+  </div>
+
+<script src="../renderer/shared/ui-helpers.js"></script>
+<script>
+const COMPOSICION = [
+  { nombre: "Acciones / CEDEARs", pct: 45, color: "var(--blue)" },
+  { nombre: "Cripto", pct: 25, color: "#f59e0b" },
+  { nombre: "FCI", pct: 20, color: "var(--green)" },
+  { nombre: "Liquidez en cuenta", pct: 10, color: "var(--muted-soft)" },
+];
+
+function renderComposicion() {
+  const el = document.getElementById('composicion-zona');
+  el.innerHTML = COMPOSICION.map(c => `
+    <div class="bar-row">
+      <div class="bar-label">${c.nombre}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${c.pct}%; background:${c.color};"></div></div>
+      <div class="bar-value">${c.pct}%</div>
+    </div>
+  `).join('');
+}
+
+document.getElementById('btn-importar').addEventListener('click', async () => {
+  const ok = await showConfirm('Importar nuevo export', 'Vas a reemplazar el patrimonio actual con los datos de un archivo CFO_Nico_*.json más reciente. Esto no afecta los movimientos ya cargados en CFO/Abate.', { confirmLabel: 'Elegir archivo' });
+  if (!ok) return;
+  showToast('Mockup: acá se abriría el selector de archivo real.');
+});
+
+renderComposicion();
+</script>
+</body>
+</html>

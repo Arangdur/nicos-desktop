@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mockup — Jefe de Gabinete</title>
+<link rel="stylesheet" href="../renderer/shared/styles.css">
+<style>
+  .mockup-banner { background: #92400e; color: white; padding: 8px 24px; font-size: 12px; text-align: center; font-weight: 600; }
+  .briefing-item { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border-soft); }
+  .briefing-item:last-child { border-bottom: none; }
+  .briefing-num { width: 24px; height: 24px; border-radius: 50%; background: var(--navy); color: white; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+  .wellness-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); }
+  .wellness-btn { padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: white; cursor: pointer; text-align: center; font-size: 13px; }
+  .wellness-btn.selected { background: var(--navy); color: white; border-color: var(--navy); }
+  .streak-badge { display: inline-flex; align-items: center; gap: 6px; background: var(--green-bg); color: var(--green); padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; }
+  .task-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+  .task-row input[type="checkbox"] { width: auto; }
+  .subtabs { display: flex; gap: 8px; margin-bottom: var(--space-4); }
+  .prompt-card { border: 1px solid var(--border); border-radius: 10px; margin-bottom: var(--space-3); overflow: hidden; }
+  .prompt-header { padding: var(--space-3) var(--space-4); cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: white; }
+  .prompt-header:hover { background: var(--navy-soft); }
+  .prompt-header .prompt-title { font-weight: 600; font-size: 14px; }
+  .prompt-header .prompt-uso { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .prompt-body { display: none; padding: 0 var(--space-4) var(--space-4) var(--space-4); }
+  .prompt-body.open { display: block; }
+  .prompt-body pre { background: var(--navy-soft); padding: var(--space-3); border-radius: 8px; font-size: 12px; white-space: pre-wrap; font-family: "SF Mono", ui-monospace, monospace; max-height: 260px; overflow-y: auto; }
+</style>
+</head>
+<body>
+  <div class="mockup-banner">MOCKUP — briefing y datos de ejemplo, sin conexión real.</div>
+  <div class="banner">
+    <div>
+      <div class="title">NicOS Desktop</div>
+      <div class="subtitle">Director · Jefe de Gabinete</div>
+    </div>
+    <span class="badge">conectado</span>
+  </div>
+
+  <div class="container">
+    <div class="tabs">
+      <button class="tab">Resumen</button>
+      <button class="tab">Tareas</button>
+      <button class="tab">Clínico</button>
+      <button class="tab active">Gabinete</button>
+      <button class="tab">Ajustes</button>
+    </div>
+
+    <div class="subtabs">
+      <button class="tab active" data-subtab="briefing">Briefing y tareas</button>
+      <button class="tab" data-subtab="prompts">Biblioteca de prompts</button>
+    </div>
+
+    <div id="subtab-briefing">
+      <div class="card">
+        <div class="row-between">
+          <h3 style="margin-bottom:0;">Briefing de hoy — 19/7/2026</h3>
+          <button class="secondary" id="btn-regenerar">Regenerar</button>
+        </div>
+        <div id="briefing-zona"></div>
+      </div>
+
+      <div class="card">
+        <h3>Check-in de bienestar</h3>
+        <label>¿Cómo dormiste anoche?</label>
+        <div class="wellness-row" id="sueno-row">
+          <div class="wellness-btn" data-val="bueno">Bueno</div>
+          <div class="wellness-btn" data-val="regular">Regular</div>
+          <div class="wellness-btn" data-val="malo">Malo</div>
+        </div>
+        <label style="margin-top:var(--space-3);">¿Hiciste ejercicio hoy?</label>
+        <div class="wellness-row" id="ejercicio-row" style="grid-template-columns:1fr 1fr;">
+          <div class="wellness-btn" data-val="si">Sí</div>
+          <div class="wellness-btn" data-val="no">No</div>
+        </div>
+        <div class="row-between" style="margin-top:var(--space-4);">
+          <span class="streak-badge">🔥 4 días seguidos de ejercicio</span>
+          <button class="primary" id="btn-guardar-checkin">Guardar check-in</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Tareas y prioridades</h3>
+        <div id="tareas-zona"></div>
+      </div>
+    </div>
+
+    <div id="subtab-prompts" style="display:none;">
+      <div class="card">
+        <h3>Biblioteca de prompts</h3>
+        <p class="help-text" style="margin-bottom:var(--space-4);">Migrada del documento que ya usás. Elegí uno, completá los datos entre corchetes, y usalo directo desde acá o copialo a Claude/ChatGPT.</p>
+        <div id="prompts-zona"></div>
+      </div>
+    </div>
+  </div>
+
+<script src="../renderer/shared/ui-helpers.js"></script>
+<script>
+const BRIEFING_DEMO = {
+  foco: "Cerrar el informe de APROSS y dejar la tarde libre para consultorio sin sobrecarga administrativa.",
+  prioridades: [
+    "Terminar informe Bertello para APROSS",
+    "Confirmar con Albano la reunión de socios del jueves",
+    "Revisar y aprobar las 2 tareas pendientes en la Bandeja de NicOS",
+  ],
+  no_hacer: "No arrancar hoy la revisión de cartera financiera -- déjala para el fin de semana, no es urgente.",
+  delegar: "Las novedades de asistencia de Abate se las podés pedir directo a Daniela en vez de juntarlas vos.",
+  alerta: null,
+  proxima_accion: "Abrí el informe Bertello y escribí el primer párrafo, ahora, antes de mirar el resto del día.",
+};
+
+let checkinSueno = null;
+let checkinEjercicio = null;
+
+let tareas = [
+  { id: 1, texto: "Terminar informe Bertello para APROSS", hecha: false, frente: "Consultorio" },
+  { id: 2, texto: "Confirmar reunión de socios del jueves con Albano", hecha: false, frente: "Abate" },
+  { id: 3, texto: "Revisar tareas pendientes en la Bandeja de NicOS", hecha: false, frente: "NicOS" },
+  { id: 4, texto: "Pagar hipoteca UVA (vence 5/8)", hecha: false, frente: "Finanzas" },
+  { id: 5, texto: "Actualizar Base_de_Datos_Consultas de la semana pasada", hecha: true, frente: "Consultorio" },
+];
+
+function renderBriefing() {
+  const el = document.getElementById('briefing-zona');
+  el.innerHTML = `
+    <div style="font-size:15px; font-weight:600; margin:var(--space-3) 0; padding:var(--space-3); background:var(--navy-soft); border-radius:8px;">
+      ${BRIEFING_DEMO.foco}
+    </div>
+    <div class="briefing-item">
+      <div class="briefing-num">1</div>
+      <div>${BRIEFING_DEMO.prioridades[0]}</div>
+    </div>
+    <div class="briefing-item">
+      <div class="briefing-num">2</div>
+      <div>${BRIEFING_DEMO.prioridades[1]}</div>
+    </div>
+    <div class="briefing-item">
+      <div class="briefing-num">3</div>
+      <div>${BRIEFING_DEMO.prioridades[2]}</div>
+    </div>
+    <div style="margin-top:var(--space-3);" class="error-box">🚫 Qué NO hacer hoy: ${BRIEFING_DEMO.no_hacer}</div>
+    <div style="margin-top:var(--space-2);" class="success-box">↗️ Delegar: ${BRIEFING_DEMO.delegar}</div>
+    <div style="margin-top:var(--space-3); padding-top:var(--space-3); border-top:1px solid var(--border-soft); font-size:14px;">
+      <b>Próxima acción concreta:</b> ${BRIEFING_DEMO.proxima_accion}
+    </div>
+  `;
+}
+
+function renderTareas() {
+  const el = document.getElementById('tareas-zona');
+  el.innerHTML = tareas.map(t => `
+    <div class="task-row">
+      <input type="checkbox" ${t.hecha ? 'checked' : ''} data-id="${t.id}">
+      <span style="flex:1; ${t.hecha ? 'text-decoration:line-through; color:var(--muted);' : ''}">${t.texto}</span>
+      <span class="tag proceso">${t.frente}</span>
+    </div>
+  `).join('');
+  el.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener('change', (e) => {
+      const t = tareas.find(x => x.id === parseInt(e.target.dataset.id, 10));
+      t.hecha = e.target.checked;
+      renderTareas();
+    });
+  });
+}
+
+document.getElementById('btn-regenerar').addEventListener('click', () => {
+  showToast('Mockup: acá se le pediría a la IA un briefing nuevo con el contexto de hoy.');
+});
+
+document.querySelectorAll('#sueno-row .wellness-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    checkinSueno = btn.dataset.val;
+    document.querySelectorAll('#sueno-row .wellness-btn').forEach(b => b.classList.toggle('selected', b === btn));
+  });
+});
+document.querySelectorAll('#ejercicio-row .wellness-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    checkinEjercicio = btn.dataset.val;
+    document.querySelectorAll('#ejercicio-row .wellness-btn').forEach(b => b.classList.toggle('selected', b === btn));
+  });
+});
+document.getElementById('btn-guardar-checkin').addEventListener('click', () => {
+  if (!checkinSueno || !checkinEjercicio) { showToast('Completá sueño y ejercicio antes de guardar.', 'error'); return; }
+  showToast('Check-in guardado. Racha actualizada.', 'success');
+});
+
+const PROMPTS = [
+  { titulo: "Plaud AI → DRAPP", uso: "Pegar transcripción de Plaud y obtener texto listo para historia clínica", herramienta: "Claude (conversacional)",
+    texto: "Sos un asistente clínico especializado en documentación médica argentina.\nTrabajás con un médico generalista y psiquiatra que atiende en sistema DRAPP.\n\nSe te va a pegar la transcripción automática de una consulta médica grabada con Plaud AI...\n\n[Prompt completo -- ver Módulo Clínico, ya integrado ahí como 'Generar borrador con IA'.]" },
+  { titulo: "Informe Psiquiátrico para Derivación / Peritaje", uso: "Generar informes formales de psiquiatría a partir de notas clave", herramienta: "Claude (conversacional)",
+    texto: "Sos un psiquiatra redactor con experiencia en informes clínicos, periciales y de derivación...\n\n[Prompt completo -- ver Módulo Clínico, ya integrado ahí como tipo de informe 'Informe psiquiátrico formal'.]" },
+  { titulo: "Resumen de Evidencia Clínica (Actualización Rápida)", uso: "Ponerse al día en un tema clínico en 5 minutos", herramienta: "Claude (con búsqueda web activada)",
+    texto: "Sos un médico internista con especialización en psiquiatría y medicina basada en evidencia...\n\nTEMA A REVISAR: [tema]\n\n1. Lo que cambió\n2. Qué confirma la evidencia actual\n3. Controversias o áreas grises\n4. Recomendación práctica concreta\n5. Fuente principal\n\nMáximo 400 palabras." },
+  { titulo: "Briefing Diario — Jefe de Gabinete", uso: "Trigger de planificación diaria, mañana temprano antes de arrancar", herramienta: "Este sistema",
+    texto: "Actuá como mi Jefe de Gabinete Personal. Necesito el briefing del día.\n\n[Ya automatizado arriba, en 'Briefing y tareas' -- este prompt es la base de lo que se genera solo cada mañana.]" },
+  { titulo: "Comunicación Institucional — Fundación Abate", uso: "Redactar mensajes, memos, notas oficiales para Abate", herramienta: "Claude (conversacional)",
+    texto: "Sos el asistente de comunicación del Director Técnico de la Fundación Abate / Casa de Medio Camino Integral, Bell Ville, Córdoba...\n\nTAREA: [nota a familia / comunicado interno / mail a obra social / acta de reunión / otro]" },
+  { titulo: "Revisión de Cartera Financiera Personal", uso: "Análisis mensual de inversiones y situación financiera", herramienta: "Claude (con datos que vos pegás)",
+    texto: "Sos un analista financiero personal que me ayuda a revisar mi cartera y tomar decisiones con información objetiva...\n\nDATOS A PEGAR: [composición de cartera, cambios, contexto macro, pregunta concreta]" },
+];
+
+function renderPrompts() {
+  const el = document.getElementById('prompts-zona');
+  el.innerHTML = PROMPTS.map((p, i) => `
+    <div class="prompt-card">
+      <div class="prompt-header" data-idx="${i}">
+        <div>
+          <div class="prompt-title">${p.titulo}</div>
+          <div class="prompt-uso">${p.uso} · ${p.herramienta}</div>
+        </div>
+        <span style="font-size:12px; color:var(--muted);">Ver ▾</span>
+      </div>
+      <div class="prompt-body" id="prompt-body-${i}">
+        <pre>${p.texto}</pre>
+        <div class="row-wrap" style="margin-top:var(--space-2);">
+          <button class="secondary btn-copiar-prompt" data-idx="${i}">Copiar prompt</button>
+          <button class="primary btn-usar-prompt" data-idx="${i}">Usar acá con estos datos</button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  el.querySelectorAll('.prompt-header').forEach(h => {
+    h.addEventListener('click', () => {
+      document.getElementById(`prompt-body-${h.dataset.idx}`).classList.toggle('open');
+    });
+  });
+  el.querySelectorAll('.btn-copiar-prompt').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showToast('Mockup: acá se copiaría el prompt completo al portapapeles.', 'success');
+    });
+  });
+  el.querySelectorAll('.btn-usar-prompt').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showToast('Mockup: esto abriría el prompt ya completado con el contexto disponible en NicOS (paciente activo, mes financiero actual, etc. según corresponda).');
+    });
+  });
+}
+
+document.querySelectorAll('[data-subtab]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-subtab]').forEach(b => b.classList.toggle('active', b === btn));
+    document.getElementById('subtab-briefing').style.display = btn.dataset.subtab === 'briefing' ? 'block' : 'none';
+    document.getElementById('subtab-prompts').style.display = btn.dataset.subtab === 'prompts' ? 'block' : 'none';
+  });
+});
+
+renderBriefing();
+renderTareas();
+renderPrompts();
+</script>
+</body>
+</html>
