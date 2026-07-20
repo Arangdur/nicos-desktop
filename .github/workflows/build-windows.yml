@@ -1,4 +1,5 @@
 name: Build Windows installer
+# (touch: forzar reindexado del workflow tras el primer push al repo)
 
 # Se dispara manualmente, al pushear a main, o al pushear un tag de versión
 # (v*) -- este último caso además PUBLICA el instalador como GitHub Release
