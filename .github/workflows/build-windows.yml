@@ -23,6 +23,15 @@ on:
     branches: [main]
     tags: ['v*']
 
+# El token automático que GitHub le da a cada corrida (GITHUB_TOKEN) viene
+# de solo-lectura por defecto en repos nuevos -- sin esto, publicar un
+# Release fallaba con 403 "Resource not accessible by integration" aunque
+# el token existía (hallazgo real, corrida 29750328465). No hace falta que
+# Nicolás cambie nada a mano en la configuración del repo -- declararlo acá
+# alcanza.
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
