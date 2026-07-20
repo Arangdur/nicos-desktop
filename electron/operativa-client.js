@@ -221,7 +221,42 @@ function getOutboxCount() {
   return _readOutbox().length;
 }
 
+// ---- Enfermería de Abate (Enfermero-only del lado del servidor) -----------
+
+async function abateListResidentes() {
+  return _authedFetch('/api/v1/abate/residentes');
+}
+
+async function abateGetTratamiento(residenteId) {
+  return _authedFetch(`/api/v1/abate/residentes/${residenteId}/tratamiento`);
+}
+
+async function abateListAdministracionesHoy(residenteId) {
+  return _authedFetch(`/api/v1/abate/residentes/${residenteId}/administraciones`);
+}
+
+async function abateRegistrarAdministracion(residenteId, droga, horarioPrevisto) {
+  return _authedFetch(`/api/v1/abate/residentes/${residenteId}/administraciones`, {
+    method: 'POST',
+    body: JSON.stringify({ droga, horario_previsto: horarioPrevisto }),
+  });
+}
+
+async function abateListNovedades(residenteId) {
+  const query = residenteId ? `?residente_id=${residenteId}` : '';
+  return _authedFetch(`/api/v1/abate/novedades${query}`);
+}
+
+async function abateCreateNovedad(residenteId, categoria, texto) {
+  return _authedFetch('/api/v1/abate/novedades', {
+    method: 'POST',
+    body: JSON.stringify({ residente_id: residenteId, categoria, texto }),
+  });
+}
+
 module.exports = {
   completeAlta, loginWithPin, listIdentities, getActiveIdentity, logout, forgetIdentity,
   submitTask, flushOutbox, listTasks, getOutboxCount, listMessages, updateMessage,
+  abateListResidentes, abateGetTratamiento, abateListAdministracionesHoy,
+  abateRegistrarAdministracion, abateListNovedades, abateCreateNovedad,
 };

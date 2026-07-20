@@ -29,4 +29,13 @@ contextBridge.exposeInMainWorld('nicos', {
   operativaOutboxCount: () => ipcRenderer.invoke('nicos:operativa-outbox-count'),
   operativaListMessages: () => ipcRenderer.invoke('nicos:operativa-list-messages'),
   operativaUpdateMessage: (row, updates) => ipcRenderer.invoke('nicos:operativa-update-message', { row, updates }),
+
+  abateListResidentes: () => ipcRenderer.invoke('nicos:abate-list-residentes'),
+  abateGetTratamiento: (residenteId) => ipcRenderer.invoke('nicos:abate-get-tratamiento', residenteId),
+  abateListAdministracionesHoy: (residenteId) => ipcRenderer.invoke('nicos:abate-list-administraciones-hoy', residenteId),
+  abateRegistrarAdministracion: (residenteId, droga, horarioPrevisto) =>
+    ipcRenderer.invoke('nicos:abate-registrar-administracion', { residenteId, droga, horarioPrevisto }),
+  abateListNovedades: (residenteId) => ipcRenderer.invoke('nicos:abate-list-novedades', residenteId),
+  abateCreateNovedad: (residenteId, categoria, texto) =>
+    ipcRenderer.invoke('nicos:abate-create-novedad', { residenteId, categoria, texto }),
 });

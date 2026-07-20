@@ -262,3 +262,14 @@ ipcMain.handle('nicos:operativa-outbox-count', () => operativaClient.getOutboxCo
 ipcMain.handle('nicos:operativa-list-messages', () => operativaClient.listMessages());
 ipcMain.handle('nicos:operativa-update-message', (_event, { row, updates }) =>
   operativaClient.updateMessage(row, updates));
+
+// ---- IPC exclusivo de la vista Enfermero (Enfermería de Abate) ----
+
+ipcMain.handle('nicos:abate-list-residentes', () => operativaClient.abateListResidentes());
+ipcMain.handle('nicos:abate-get-tratamiento', (_event, residenteId) => operativaClient.abateGetTratamiento(residenteId));
+ipcMain.handle('nicos:abate-list-administraciones-hoy', (_event, residenteId) => operativaClient.abateListAdministracionesHoy(residenteId));
+ipcMain.handle('nicos:abate-registrar-administracion', (_event, { residenteId, droga, horarioPrevisto }) =>
+  operativaClient.abateRegistrarAdministracion(residenteId, droga, horarioPrevisto));
+ipcMain.handle('nicos:abate-list-novedades', (_event, residenteId) => operativaClient.abateListNovedades(residenteId));
+ipcMain.handle('nicos:abate-create-novedad', (_event, { residenteId, categoria, texto }) =>
+  operativaClient.abateCreateNovedad(residenteId, categoria, texto));
