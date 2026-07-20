@@ -1,3 +1,42 @@
+## Apéndice — 20 de julio, mañana: repo conectado y primer release real
+
+Después de este informe, se ejecutó el checklist con vos: creaste el repo
+`Arangdur/nicos-desktop` (privado), autenticaste `gh` en tu Mac, y desde acá
+se conectó el remoto, se pusheó todo (`feature/nicos-v0.2` + los 14 tags
+existentes), se completó `owner`/`repo` en `package.json`, y se disparó el
+workflow de Windows real para probarlo de punta a punta.
+
+**Encontramos y corregimos 3 bugs reales que solo aparecen corriendo en
+GitHub de verdad (ninguno se podía ver en modo desarrollo local)**:
+
+1. El workflow tardó en aparecer como automatización activa en GitHub tras
+   el primer push — se resolvió con un commit trivial que lo "tocó" (patrón
+   conocido para forzar el reindexado).
+2. `electron-builder` intenta publicar solo apenas detecta que corre en un
+   servidor de CI, aunque no se le pida explícitamente — hacía falta decirle
+   `--publish never` en las compilaciones que no son de un tag real.
+3. El token automático que usa cada corrida de GitHub Actions viene de
+   solo-lectura por defecto en repos nuevos — hacía falta pedirle permiso
+   explícito de escritura (`permissions: contents: write`) para que pudiera
+   publicar.
+
+Con los tres corregidos, se cortó el primer release real: **`v0.2.2`**,
+publicado (no borrador) en
+https://github.com/Arangdur/nicos-desktop/releases/tag/v0.2.2, con el
+instalador de Windows (`NicOS-Desktop-0.2.2-x64.exe`) adjunto. También se
+ajustó `releaseType: release` en `package.json` para que **de acá en
+adelante, cualquier tag nuevo que cortes se publique solo, sin que tengas
+que entrar a GitHub a confirmar nada a mano**.
+
+**Lo que esto prueba**: el pipeline completo (vos cortás un tag → GitHub
+compila en un runner Windows real → publica el instalador) funciona de
+punta a punta. Lo que todavía NO está probado es el otro extremo: que una
+instalación real de NicOS Desktop en una PC Windows detecte este release y
+se actualice sola — eso requiere la prueba física que sigue pendiente
+(§ checklist, punto 5).
+
+---
+
 # Informe de sesión — 19/20 de julio de 2026 (madrugada)
 
 Pediste trabajar "en automático": auditar todo, pasar del modelo de roles
