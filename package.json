@@ -54,7 +54,8 @@
       "publish": {
         "provider": "github",
         "owner": "Arangdur",
-        "repo": "nicos-desktop"
+        "repo": "nicos-desktop",
+        "releaseType": "release"
       }
     },
     "nsis": {
