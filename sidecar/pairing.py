@@ -264,6 +264,15 @@ def list_devices():
     ).fetchall()]
 
 
+def get_role(user_id: str):
+    """Rol real de la persona (no del dispositivo) -- para que server.py pueda
+    bloquear rutas por rol (ej. Abate es Enfermero-only, ni Operativa ni un
+    dispositivo con token válido pero de otro rol puede escribir ahí)."""
+    conn = db.get_connection()
+    row = conn.execute("SELECT role FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    return row["role"] if row else None
+
+
 def revoke_device(device_id: str):
     conn = db.get_connection()
     conn.execute(

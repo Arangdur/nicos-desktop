@@ -32,6 +32,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
+import abate_enfermeria
 import ai_router
 import centro_mando_adapter
 import clinical_guard
@@ -128,10 +129,13 @@ class Handler(BaseHTTPRequestHandler):
         return getattr(self.server, "is_lan", False)
 
     def _authenticate(self):
-        """Servidor local: confiado, siempre 'nicolas'. Servidor LAN: exige Bearer
-        token válido emitido por pairing — devuelve None si falta o es inválido."""
+        """Servidor local: confiado, siempre 'nicolas'/'director'. Servidor LAN:
+        exige Bearer token válido emitido por pairing — devuelve None si falta
+        o es inválido. Incluye el ROL real de la persona (no solo su user_id)
+        -- server.py lo usa para bloquear rutas por rol (ej. Abate es
+        Enfermero-only), no solo por is_lan()."""
         if not self._is_lan():
-            return {"user_id": "nicolas", "device_id": None}
+            return {"user_id": "nicolas", "device_id": None, "role": "director"}
         auth = self.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
             return None
@@ -139,7 +143,21 @@ class Handler(BaseHTTPRequestHandler):
         device = pairing.verify_token(token)
         if device is None:
             return None
-        return {"user_id": device["user_id"], "device_id": device["device_id"]}
+        role = pairing.get_role(device["user_id"])
+        return {"user_id": device["user_id"], "device_id": device["device_id"], "role": role}
+
+    def _require_role(self, auth, allowed_roles):
+        """Autentica Y exige que el rol esté en `allowed_roles` -- ya manda la
+        respuesta de error (401/403) si no corresponde. Devuelve el `auth`
+        dict si pasa, o None si ya respondió con un error (el caller solo
+        tiene que chequear `if auth is None: return`)."""
+        if auth is None:
+            self._send_json(401, {"ok": False, "error": "token inválido o ausente"})
+            return None
+        if auth["role"] not in allowed_roles:
+            self._send_json(403, {"ok": False, "error": f"esta acción es solo para: {', '.join(sorted(allowed_roles))}"})
+            return None
+        return auth
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -231,6 +249,37 @@ class Handler(BaseHTTPRequestHandler):
                     "users": pairing.list_users(),
                     "pending": pairing.list_pending_codes(),
                 })
+            elif path == "/api/v1/abate/residentes":
+                auth = self._require_role(self._authenticate(), {"director", "enfermero"})
+                if auth is None:
+                    return
+                self._send_json(200, {"ok": True, "residentes": abate_enfermeria.list_residentes()})
+            elif path.startswith("/api/v1/abate/residentes/") and path.endswith("/tratamiento"):
+                auth = self._require_role(self._authenticate(), {"director", "enfermero"})
+                if auth is None:
+                    return
+                residente_id = path.split("/")[5]
+                tratamiento = abate_enfermeria.get_tratamiento(residente_id)
+                self._send_json(200, {"ok": True, "tratamiento": tratamiento})
+            elif path.startswith("/api/v1/abate/residentes/") and path.endswith("/administraciones"):
+                auth = self._require_role(self._authenticate(), {"director", "enfermero"})
+                if auth is None:
+                    return
+                residente_id = path.split("/")[5]
+                self._send_json(200, {"ok": True, "administraciones": abate_enfermeria.list_administraciones_hoy(residente_id)})
+            elif path == "/api/v1/abate/novedades":
+                auth = self._require_role(self._authenticate(), {"director", "enfermero"})
+                if auth is None:
+                    return
+                qs = {}
+                if parsed.query:
+                    from urllib.parse import parse_qs
+                    qs = parse_qs(parsed.query)
+                novedades = abate_enfermeria.list_novedades(
+                    residente_id=qs.get("residente_id", [None])[0],
+                    categoria=qs.get("categoria", [None])[0],
+                )
+                self._send_json(200, {"ok": True, "novedades": novedades})
             else:
                 self._send_json(404, {"ok": False, "error": "ruta no encontrada"})
         except sheets_client.SheetsConfigError as e:
@@ -397,12 +446,68 @@ class Handler(BaseHTTPRequestHandler):
                 pairing.revoke_device(device_id)
                 self._send_json(200, {"ok": True})
 
+            elif path == "/api/v1/abate/residentes":
+                # Director-only: alta de residentes -- igual que el resto de
+                # las rutas admin, bloqueada a nivel de servidor (is_lan()),
+                # no solo por rol.
+                if self._is_lan():
+                    self._send_json(403, {"ok": False, "error": "solo disponible localmente"})
+                    return
+                result = abate_enfermeria.create_residente(body.get("nombre", ""), created_by="nicolas")
+                self._send_json(200, {"ok": True, **result})
+
+            elif path.startswith("/api/v1/abate/residentes/") and path.endswith("/activo"):
+                if self._is_lan():
+                    self._send_json(403, {"ok": False, "error": "solo disponible localmente"})
+                    return
+                residente_id = path.split("/")[5]
+                abate_enfermeria.set_activo(residente_id, bool(body.get("activo", True)))
+                self._send_json(200, {"ok": True})
+
+            elif path.startswith("/api/v1/abate/residentes/") and path.endswith("/tratamiento"):
+                # Director-only: solo él edita el tratamiento vigente -- el
+                # enfermero lo lee (GET) y tilda tomas, nunca lo modifica.
+                if self._is_lan():
+                    self._send_json(403, {"ok": False, "error": "solo disponible localmente"})
+                    return
+                residente_id = path.split("/")[5]
+                abate_enfermeria.set_tratamiento(
+                    residente_id, body.get("medicacion", []), body.get("indicaciones", ""), updated_by="nicolas",
+                )
+                self._send_json(200, {"ok": True})
+
+            elif path.startswith("/api/v1/abate/residentes/") and path.endswith("/administraciones"):
+                # Enfermero-only -- Operativa (o cualquier otro rol) recibe 403
+                # aunque tenga un token de dispositivo válido.
+                auth = self._require_role(self._authenticate(), {"enfermero"})
+                if auth is None:
+                    return
+                residente_id = path.split("/")[5]
+                result = abate_enfermeria.registrar_administracion(
+                    residente_id, body.get("droga", ""), body.get("horario_previsto", ""), administrado_by=auth["user_id"],
+                )
+                self._send_json(200, {"ok": True, **result})
+
+            elif path == "/api/v1/abate/novedades":
+                # Enfermero-only. Texto tal cual, sin pasar por ai_router en
+                # ningún punto -- ver abate_enfermeria.create_novedad.
+                auth = self._require_role(self._authenticate(), {"enfermero"})
+                if auth is None:
+                    return
+                result = abate_enfermeria.create_novedad(
+                    body.get("residente_id", ""), body.get("categoria", ""), body.get("texto", ""),
+                    created_by=auth["user_id"],
+                )
+                self._send_json(200, {"ok": True, **result})
+
             else:
                 self._send_json(404, {"ok": False, "error": "ruta no encontrada"})
         except sheets_client.SheetsConfigError as e:
             self._send_json(200, {"ok": False, "error": str(e)})
         except json.JSONDecodeError:
             self._send_json(400, {"ok": False, "error": "body no es JSON válido"})
+        except abate_enfermeria.AbateError as e:
+            self._send_json(400, {"ok": False, "error": str(e)})
         except Exception as e:
             sys.stderr.write("[sidecar] ERROR: " + traceback.format_exc() + "\n")
             self._send_json(500, {"ok": False, "error": str(e)})
