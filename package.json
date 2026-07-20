@@ -53,8 +53,8 @@
       ],
       "publish": {
         "provider": "github",
-        "owner": "TU_USUARIO_DE_GITHUB",
-        "repo": "TU_REPO_DE_GITHUB"
+        "owner": "Arangdur",
+        "repo": "nicos-desktop"
       }
     },
     "nsis": {
