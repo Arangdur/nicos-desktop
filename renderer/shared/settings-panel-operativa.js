@@ -5,10 +5,20 @@
 // vinculada esta PC, y permite "olvidar" tu propio acceso (no el de otras
 // personas que puedan compartir el mismo dispositivo, ver login.html).
 
+const UPDATE_STATUS_LABEL = {
+  checking: 'Buscando actualizaciones...',
+  available: 'Hay una versión nueva -- descargando...',
+  'up-to-date': 'Ya tenés la última versión.',
+  downloading: 'Descargando...',
+  downloaded: 'Lista para instalar.',
+  error: 'No se pudo buscar actualizaciones.',
+};
+
 async function renderSettingsPanelOperativa(containerEl) {
   const current = await window.nicos.getMaskedSettings();
   const identity = await window.nicos.identityActive();
   const outboxCount = await window.nicos.operativaOutboxCount();
+  const about = await window.nicos.getAboutInfo();
 
   const TURNO_LABEL = { manana: 'mañana', tarde: 'tarde', noche: 'noche', rotativo: 'rotativo' };
 
@@ -26,6 +36,21 @@ async function renderSettingsPanelOperativa(containerEl) {
         <button class="danger" id="btn-forget-identity">Olvidar mi acceso</button>
       </div>
     </div>
+
+    <div class="card">
+      <h3>Actualizaciones</h3>
+      <dl class="kv-grid">
+        <dt>Versión instalada</dt><dd>${about.app_version || '—'}</dd>
+      </dl>
+      <p class="help-text" id="update-status" style="margin-top:var(--space-2);">
+        Nicolás publica las actualizaciones -- acá podés buscarlas cuando quieras, sin esperar (solo funciona en la versión instalada, no en modo desarrollo).
+      </p>
+      <div class="row-wrap" style="margin-top:var(--space-3);">
+        <button class="secondary" id="btn-check-updates">Buscar actualizaciones ahora</button>
+        <button class="primary" id="btn-install-update" style="display:none;">Instalar y reiniciar</button>
+      </div>
+    </div>
+
     <p class="help-text">
       Esta PC nunca guarda claves de IA ni credenciales de Google — esas viven solo
       en la Mac de Nicolás. Esta pantalla no tiene ni puede tener esos campos.
@@ -45,5 +70,37 @@ async function renderSettingsPanelOperativa(containerEl) {
     if (!ok || !identity) return;
     await window.nicos.identityForget(identity.user_id);
     await window.nicos.identityLogout();
+  });
+
+  const statusEl = containerEl.querySelector('#update-status');
+  const installBtn = containerEl.querySelector('#btn-install-update');
+
+  containerEl.querySelector('#btn-check-updates').addEventListener('click', async () => {
+    const result = await window.nicos.checkForUpdates();
+    if (!result.ok) {
+      statusEl.textContent = result.error || 'No se pudo buscar actualizaciones (¿estás en modo desarrollo?).';
+    }
+  });
+
+  window.nicos.onUpdateStatus(({ status, version, percent, message }) => {
+    if (status === 'available') {
+      statusEl.textContent = `Versión ${version} disponible -- descargando...`;
+      window.nicos.downloadUpdate();
+    } else if (status === 'downloading') {
+      statusEl.textContent = `Descargando actualización... ${percent}%`;
+    } else if (status === 'downloaded') {
+      statusEl.textContent = `Versión ${version} lista para instalar.`;
+      installBtn.style.display = 'inline-block';
+    } else if (status === 'error') {
+      statusEl.textContent = `Error buscando actualizaciones: ${message}`;
+    } else {
+      statusEl.textContent = UPDATE_STATUS_LABEL[status] || '';
+    }
+  });
+
+  installBtn.addEventListener('click', async () => {
+    const ok = await showConfirm('Instalar actualización', 'La app se va a cerrar y volver a abrir con la nueva versión.', { confirmLabel: 'Instalar y reiniciar' });
+    if (!ok) return;
+    await window.nicos.quitAndInstallUpdate();
   });
 }

@@ -18,6 +18,11 @@ contextBridge.exposeInMainWorld('nicos', {
   identityForget: (userId) => ipcRenderer.invoke('nicos:identity-forget', userId),
   identityLogout: () => ipcRenderer.invoke('nicos:identity-logout'),
 
+  checkForUpdates: () => ipcRenderer.invoke('nicos:check-for-updates'),
+  downloadUpdate: () => ipcRenderer.invoke('nicos:download-update'),
+  quitAndInstallUpdate: () => ipcRenderer.invoke('nicos:quit-and-install-update'),
+  onUpdateStatus: (callback) => ipcRenderer.on('nicos:update-status', (_event, data) => callback(data)),
+
   operativaSubmitTask: (rawText) => ipcRenderer.invoke('nicos:operativa-submit-task', rawText),
   operativaListTasks: () => ipcRenderer.invoke('nicos:operativa-list-tasks'),
   operativaFlushOutbox: () => ipcRenderer.invoke('nicos:operativa-flush-outbox'),

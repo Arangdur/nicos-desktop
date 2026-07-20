@@ -5,9 +5,23 @@ const fs = require('fs');
 const settingsStore = require('./settings-store');
 const sidecar = require('./sidecar-manager');
 const operativaClient = require('./operativa-client');
+const autoUpdaterModule = require('./auto-updater');
 
 let mainWindow = null;
 let outboxFlushInterval = null;
+let updateCheckInterval = null;
+
+// v0.2.2 -- auto-actualización SOLO para instalaciones no-Director, y SOLO
+// empaquetadas (app.isPackaged) -- en desarrollo no hay ningún feed de
+// actualizaciones real, y la Mac de Nicolás nunca se auto-actualiza así (él
+// la actualiza directamente, corriendo el repo).
+function _maybeInitAutoUpdater(role) {
+  if (role === 'director' || !app.isPackaged) return;
+  autoUpdaterModule.init(mainWindow);
+  if (!updateCheckInterval) {
+    updateCheckInterval = setInterval(() => autoUpdaterModule.checkForUpdates(), 4 * 60 * 60 * 1000);
+  }
+}
 
 function _envFromConfig(config) {
   const env = {};
@@ -67,6 +81,8 @@ async function _bootAndLoad() {
     operativaClient.logout();
     mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'shared', 'login.html'), { search: query });
   }
+
+  _maybeInitAutoUpdater(role);
 }
 
 function _loadRoleScreen(role) {
@@ -109,12 +125,14 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   sidecar.stopSidecar();
   if (outboxFlushInterval) clearInterval(outboxFlushInterval);
+  if (updateCheckInterval) clearInterval(updateCheckInterval);
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', () => {
   sidecar.stopSidecar();
   if (outboxFlushInterval) clearInterval(outboxFlushInterval);
+  if (updateCheckInterval) clearInterval(updateCheckInterval);
 });
 
 // ---- IPC comunes ----
@@ -228,6 +246,12 @@ ipcMain.handle('nicos:identity-logout', async () => {
   if (mainWindow) mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'shared', 'login.html'));
   return { ok: true };
 });
+
+// ---- IPC de auto-actualización (solo relevante fuera de la Mac de Nicolás) ----
+
+ipcMain.handle('nicos:check-for-updates', () => autoUpdaterModule.checkForUpdates());
+ipcMain.handle('nicos:download-update', () => autoUpdaterModule.downloadUpdate());
+ipcMain.handle('nicos:quit-and-install-update', () => autoUpdaterModule.quitAndInstall());
 
 // ---- IPC exclusivo de las vistas no-Director (Operativa, Enfermero) ----
 
