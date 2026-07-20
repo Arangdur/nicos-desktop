@@ -88,10 +88,14 @@ NicOS Desktop
     └── Auditoría (ya existe: task_events, idempotencia, recuperación de caídas)
 ```
 
-## 5. Lo que ya está construido y se reutiliza tal cual (rc10)
+## 5. Lo que ya está construido y se reutiliza tal cual (rc10 + v0.2.2)
 
 No se tira nada de lo hecho hasta ahora — es la base técnica de todo lo de arriba:
 
+- **[v0.2.2] Modelo de roles extensible, ya real (no mockup)**: `users` pasó de ser una tabla semilla fija de 2 filas a un catálogo abierto (migración 005) — el Director elige rol y turno AL GENERAR el código (`pairing.start_pairing`), la persona completa nombre/DNI/fecha de nacimiento/sexo/PIN en su propia alta (`pairing.complete_pairing`), y recién ahí se crea su identidad real. Probado con Carlos (Enfermero, turno mañana) de punta a punta: alta → pantalla real de Enfermería con su nombre → Ajustes → cambiar de persona → login con PIN sin volver a tocar la red. 26/26 tests del sidecar en verde (`sidecar/tests/test_roles_extensibles.py`, 15 casos nuevos).
+- **[v0.2.2] Pantalla real de login/alta** (`renderer/shared/login.html`) reemplaza el viejo `pairing.html` de un solo token — toda PC no-Director pasa por acá en cada arranque, con selector "¿Quién sos?" para dispositivos compartidos entre varias personas (ej. la PC de enfermería de Abate) y PIN verificado 100% local/offline (para no romper el diseño ya existente de cola local cuando la Mac de Nicolás está apagada/dormida).
+- **[v0.2.2] `renderer/enfermero/`**: pantalla real (no mockup) para el rol Enfermero — identidad y vinculación ya funcionan de verdad, pero dice explícitamente que la carga de novedades/medicación todavía no está construida (el diseño validado sigue en `mockups/enfermeria-abate.html`) en vez de mostrar datos falsos.
+- **[v0.2.2] Auto-actualización de las PC no-Director** vía `electron-updater` + GitHub Releases (`electron/auto-updater.js`) — Nicolás pushea un tag desde su Mac, el workflow ya compila y publica, y esas PCs lo detectan solas. Código listo pero **no activo todavía**: falta que el repo tenga un remoto de GitHub real y que se completen `owner`/`repo` en `package.json` (ver informe `docs/INFORME_SESION_2026-07-20.md`).
 - Roles Director/Operativa con candado real (no se puede escalar de Operativa a Director desde la UI) — se extiende a N roles según §3, sin perder esta garantía.
 - Pairing por código de 6 dígitos + token revocable, red exclusivamente por Tailscale.
 - Máquina de estados de tareas (`received → ... → completed/failed/cancelled/needs_review`), con aprobación versionada (`task_revision` + hash de acción) y auditoría append-only (`task_events`).
@@ -137,17 +141,17 @@ Nota: Albano y Daniela no son roles de NicOS (no tienen dispositivo propio vincu
 
 ## 9. Orden de implementación propuesto
 
-1. **Congelar `rc10`** como base técnica (ya está — es este mismo commit).
-2. Migrar el modelo de roles de "fijo por instalación" a "asignado por dispositivo" (§3) — es la base para todo lo que sigue, incluido el rol Enfermero.
+1. ~~Congelar `rc10` como base técnica~~ — hecho.
+2. ~~Migrar el modelo de roles de "fijo por instalación" a "asignado por dispositivo"~~ — **hecho, v0.2.2 (esta madrugada)**: migración 005 + backend + Electron real, verificado en vivo, 26/26 tests. Ver §5 y el informe de sesión.
 3. Diseñar el modelo de datos y permisos del módulo clínico (nuevas migraciones, cifrado adicional para lo clínico, separado de lo financiero).
 4. Migrar el WhatsApp de pacientes de n8n a NicOS Desktop (Twilio, ya migrado de Meta — reutilizar esa configuración).
 5. Construir el módulo clínico mínimo: buscar paciente, ver evoluciones agregadas propias, Plaud→borrador de nota vía IA, revisar, guardar, copiar a DRAPP.
 6. Ajustar la vista Operativa al modelo de permisos de la tabla del §6.
-7. Construir el rol Enfermero/a de Abate (novedades operativo + clínico-conductual + administrativo), una vez resueltas las preguntas del §8.
+7. Construir el rol Enfermero/a de Abate (novedades operativo + clínico-conductual + administrativo), una vez resueltas las preguntas del §8. **Parcial**: la identidad/login del rol ya es real (paso 2); falta la pantalla de función en sí (carga de novedades, tildar medicación) — diseño ya validado en `mockups/enfermeria-abate.html`, sin construir todavía.
 8. Integrar lectura de patrimonio (`CFO_Nico_*.json`) al módulo de Finanzas, si seguís queriéndolo.
 9. Ampliar el panel de Trading (sin tocar la regla de "sin señales autónomas").
 10. Migrar Jefe de Gabinete (briefing, bienestar, biblioteca de prompts) a NicOS.
-11. **Recién ahí**: retomar el `.exe` de Windows, la prueba física con Marianela (y ahora también con al menos un enfermero de Abate), y la llamada real a OpenAI — con el alcance correcto, para no instalarle a nadie algo que va a cambiar de nuevo en dos semanas.
+11. Retomar el `.exe` de Windows, la prueba física con Marianela (y ahora también con al menos un enfermero de Abate), y la llamada real a OpenAI — con el alcance correcto, para no instalarle a nadie algo que va a cambiar de nuevo en dos semanas. **El código del instalador con auto-actualización ya existe (v0.2.2)** — lo que falta es exclusivamente tuyo: crear el repo en GitHub, conectar el remoto, y la prueba física en sí.
 
 ## 10. Lo que NO cambia respecto a lo ya acordado esta sesión
 
