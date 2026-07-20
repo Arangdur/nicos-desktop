@@ -43,7 +43,14 @@ jobs:
 
       - name: Generar instalador .exe
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
-        run: npx electron-builder --win
+        # --publish never es obligatorio acá: electron-builder detecta que
+        # corre en CI (GITHUB_ACTIONS=true, seteado automáticamente por el
+        # runner) y, apenas ve un `build.win.publish` en package.json, intenta
+        # publicar solo -- sin importar que este paso nunca pasó "--publish".
+        # Sin esto, cualquier build fuera de un tag fallaba pidiendo GH_TOKEN
+        # aunque no se le haya pedido publicar nada (hallazgo real, corrida
+        # 29744582517).
+        run: npx electron-builder --win --publish never
 
       - name: Generar y publicar instalador .exe como Release (solo en tags v*)
         if: startsWith(github.ref, 'refs/tags/v')
