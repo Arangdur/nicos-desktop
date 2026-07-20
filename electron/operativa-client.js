@@ -1,12 +1,20 @@
-// Cliente HTTP hacia el sidecar de la Mac de Nicolás, usado SOLO por la vista
-// Operativa. El token de dispositivo vive y se usa acá, en el proceso principal
-// de Electron — nunca se le pasa al renderer (contextIsolation), así que ni
-// siquiera un bug de XSS en la UI podría filtrarlo.
+// Cliente HTTP hacia el sidecar de la Mac de Nicolás, usado por las vistas
+// no-Director (Operativa, Enfermero/a de Abate, futuros roles). El token de
+// dispositivo vive y se usa acá, en el proceso principal de Electron — nunca
+// se le pasa al renderer (contextIsolation), así que ni siquiera un bug de
+// XSS en la UI podría filtrarlo.
+//
+// v0.2.2 -- una misma PC puede tener VARIAS personas vinculadas (ver
+// settings-store.getIdentities). `activeUserId` es en memoria, no persiste
+// entre reinicios de la app a propósito: cada arranque vuelve a preguntar
+// "¿quién sos?" (ver renderer/shared/login.html), coherente con el turno real
+// de quien esté sentada/o frente a esa PC en ese momento.
 //
 // Si la Mac está desconectada, las tareas se guardan en un outbox local (JSON
 // plano, sin secretos — solo texto de la tarea) y se reintentan cuando vuelve
 // la conexión. Esto es exactamente lo que pidió Nicolás: "Tarea recibida, se
-// procesará cuando el ejecutor esté conectado."
+// procesará cuando el ejecutor esté conectado." El LOGIN por PIN funciona
+// igual de offline -- ver loginWithPin.
 const { app } = require('electron');
 const fs = require('fs');
 const path = require('path');
@@ -16,6 +24,8 @@ const settingsStore = require('./settings-store');
 
 const OUTBOX_PATH = path.join(app.getPath('userData'), 'nicos-outbox.json');
 const FETCH_TIMEOUT_MS = 5000;
+
+let activeUserId = null;
 
 function _readOutbox() {
   if (!fs.existsSync(OUTBOX_PATH)) return [];
@@ -48,40 +58,103 @@ async function _fetchWithTimeout(url, opts) {
   }
 }
 
-async function pairWithMac(host, port, code, deviceName) {
+function _hashPinLocal(pin) {
+  return crypto.createHash('sha256').update(pin, 'utf-8').digest('hex');
+}
+
+// ---- Identidades: alta, login, listado, olvido -----------------------------
+
+function listIdentities() {
+  // Nunca expone token ni pin_hash_local al renderer -- solo lo que hace
+  // falta para dibujar el selector "¿Quién sos?".
+  return settingsStore.getIdentities().map(({ user_id, display_name, role, turno, device_name }) => ({
+    user_id, display_name, role, turno, device_name,
+  }));
+}
+
+function getActiveIdentity() {
+  if (!activeUserId) return null;
+  const identity = settingsStore.getIdentities().find((i) => i.user_id === activeUserId);
+  if (!identity) return null;
+  const { user_id, display_name, role, turno } = identity;
+  return { user_id, display_name, role, turno };
+}
+
+function logout() {
+  activeUserId = null;
+}
+
+async function completeAlta({ host, port, code, deviceName, displayName, dni, fechaNacimiento, sexo, pin }) {
   const url = `http://${host}:${port}/api/v1/pairing/complete`;
   const res = await _fetchWithTimeout(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code, device_name: deviceName }),
+    body: JSON.stringify({
+      code, device_name: deviceName, display_name: displayName, dni,
+      fecha_nacimiento: fechaNacimiento, sexo, pin,
+    }),
   });
   const data = await res.json();
   if (!data.ok) {
-    throw new Error(data.error || 'No se pudo vincular.');
+    throw new Error(data.error || 'No se pudo completar el alta.');
   }
+
   settingsStore.saveSettings({
-    role: 'operativa',
+    role: 'operativa', // rol de MÁQUINA ("no es la Mac de Nicolás") -- el rol real de la persona vive en la identidad
     MAC_LAN_HOST: host,
     MAC_LAN_PORT: String(port),
-    PAIRED_DEVICE_ID: data.device_id,
-    PAIRED_DEVICE_NAME: deviceName,
-    PAIRED_DEVICE_TOKEN: data.token,
   });
-  return { ok: true };
+  settingsStore.addIdentity({
+    user_id: data.user_id,
+    display_name: data.display_name,
+    role: data.role,
+    turno: data.turno || null,
+    device_id: data.device_id,
+    device_name: deviceName,
+    token: data.token,
+    pin_hash_local: _hashPinLocal(pin),
+  });
+  activeUserId = data.user_id;
+  return { ok: true, user_id: data.user_id, role: data.role, display_name: data.display_name };
 }
+
+async function loginWithPin(userId, pin) {
+  // A propósito 100% local/offline -- ver comentario de cabecera. El PIN no
+  // es el mecanismo de seguridad real (ese es el token, ya emitido en el
+  // alta) -- es solo "¿esta persona es quien dice ser, en ESTE dispositivo
+  // compartido?", y esa pregunta la puede responder el propio dispositivo.
+  const identity = settingsStore.getIdentities().find((i) => i.user_id === userId);
+  if (!identity) {
+    return { ok: false, error: 'No se encontró esa identidad en esta PC.' };
+  }
+  if (_hashPinLocal(pin) !== identity.pin_hash_local) {
+    return { ok: false, error: 'PIN incorrecto.' };
+  }
+  activeUserId = userId;
+  return { ok: true, role: identity.role, display_name: identity.display_name };
+}
+
+function forgetIdentity(userId) {
+  settingsStore.removeIdentity(userId);
+  if (activeUserId === userId) activeUserId = null;
+  return { ok: true, remaining: settingsStore.getIdentities().length };
+}
+
+// ---- Llamadas autenticadas con el token de la identidad ACTIVA ------------
 
 async function _authedFetch(pathAndQuery, opts = {}) {
   const config = settingsStore.getDecryptedConfig();
   const base = _baseUrl(config);
-  if (!base || !config.PAIRED_DEVICE_TOKEN) {
-    return { ok: false, offline: true, error: 'No hay vinculación con la Mac configurada.' };
+  const identity = settingsStore.getIdentities().find((i) => i.user_id === activeUserId);
+  if (!base || !identity) {
+    return { ok: false, offline: true, error: 'No hay una sesión activa vinculada con la Mac.' };
   }
   try {
     const res = await _fetchWithTimeout(`${base}${pathAndQuery}`, {
       ...opts,
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.PAIRED_DEVICE_TOKEN}`,
+        Authorization: `Bearer ${identity.token}`,
         ...(opts.headers || {}),
       },
     });
@@ -149,5 +222,6 @@ function getOutboxCount() {
 }
 
 module.exports = {
-  pairWithMac, submitTask, flushOutbox, listTasks, getOutboxCount, listMessages, updateMessage,
+  completeAlta, loginWithPin, listIdentities, getActiveIdentity, logout, forgetIdentity,
+  submitTask, flushOutbox, listTasks, getOutboxCount, listMessages, updateMessage,
 };

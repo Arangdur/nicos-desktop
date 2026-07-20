@@ -48,16 +48,42 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
     </div>
 
     <div class="card">
-      <h3>Dispositivos vinculados (PC de Marianela y otros)</h3>
+      <h3>Personas con acceso a NicOS</h3>
       <p class="help-text">
-        Estos dispositivos pueden enviar tareas por la red local — nunca tienen tus claves
-        de IA ni de Google, solo un token revocable.
+        Cada persona vinculada tiene un rol fijo asignado en este paso — no se puede
+        cambiar después sin revocar y volver a vincular. Nunca tienen tus claves de IA
+        ni de Google, solo un token revocable.
       </p>
-      <button class="secondary" id="btn-start-pairing">Vincular nuevo dispositivo</button>
+
+      <label style="margin-top:var(--space-3);">Nombre completo</label>
+      <input type="text" id="nueva-persona-nombre" placeholder="Ej. Daniela Fernández">
+
+      <label style="margin-top:var(--space-3);">Rol</label>
+      <select id="nueva-persona-rol">
+        <option value="operativa">Operativa (Secretaria)</option>
+        <option value="enfermero">Enfermero/a de Abate</option>
+      </select>
+
+      <div id="campo-nuevo-turno" style="margin-top:var(--space-3); display:none;">
+        <label>Turno habitual (opcional, informativo)</label>
+        <select id="nueva-persona-turno">
+          <option value="">Sin especificar</option>
+          <option value="manana">Mañana</option>
+          <option value="tarde">Tarde</option>
+          <option value="noche">Noche</option>
+          <option value="rotativo">Rotativo</option>
+        </select>
+      </div>
+
+      <button class="secondary" id="btn-start-pairing" style="margin-top:var(--space-4);">Generar código de vinculación</button>
       <div id="pairing-code-display" style="margin:var(--space-3) 0; font-size:var(--text-base);"></div>
       <div id="devices-list" style="margin-top:var(--space-3);"></div>
     </div>
   `;
+
+  containerEl.querySelector('#nueva-persona-rol').addEventListener('change', (e) => {
+    containerEl.querySelector('#campo-nuevo-turno').style.display = e.target.value === 'enfermero' ? 'block' : 'none';
+  });
 
   containerEl.querySelector('#btn-save-settings').addEventListener('click', async () => {
     const statusEl = containerEl.querySelector('#settings-status');
@@ -97,48 +123,81 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
     }
   });
 
+  const ROL_LABEL = { operativa: 'Operativa (Secretaria)', enfermero: 'Enfermero/a de Abate' };
+  const TURNO_LABEL = { manana: 'mañana', tarde: 'tarde', noche: 'noche', rotativo: 'rotativo' };
+
   async function loadDevices() {
     const listEl = containerEl.querySelector('#devices-list');
-    const res = await fetch(`${apiBase}/api/v1/devices`);
+    const res = await fetch(`${apiBase}/api/v1/users`);
     const data = await res.json();
     if (!data.ok) {
       listEl.innerHTML = `<div class="error-box">${data.error}</div>`;
       return;
     }
-    if (data.devices.length === 0) {
-      listEl.innerHTML = '<div class="empty">Ningún dispositivo vinculado todavía.</div>';
+    if (data.users.length === 0 && data.pending.length === 0) {
+      listEl.innerHTML = '<div class="empty">Nadie vinculado todavía.</div>';
       return;
     }
+    const filasPendientes = data.pending.map((p) => `
+      <tr>
+        <td>${p.assigned_display_name || '(sin nombre)'}<div class="rol-sub" style="font-size:12px; color:var(--muted);">Datos personales pendientes -- los completa la persona al hacer su alta</div></td>
+        <td>${ROL_LABEL[p.assigned_role] || p.assigned_role}${p.assigned_turno ? ' · turno ' + (TURNO_LABEL[p.assigned_turno] || p.assigned_turno) : ''}</td>
+        <td>—</td>
+        <td><span class="tag proceso">Código generado</span></td>
+        <td><button class="secondary btn-cancel-code" data-code="${p.code}">Cancelar código</button></td>
+      </tr>
+    `).join('');
+    const filasPersonas = data.users.map((u) => `
+      <tr>
+        <td>${u.display_name}${u.dni ? `<div style="font-size:12px; color:var(--muted);">DNI ${u.dni}</div>` : ''}</td>
+        <td>${ROL_LABEL[u.role] || u.role}${u.turno ? ' · turno ' + (TURNO_LABEL[u.turno] || u.turno) : ''}</td>
+        <td>${u.created_at ? new Date(u.created_at).toLocaleString('es-AR') : '—'}</td>
+        <td>${u.revoked_at ? '<span class="tag nuevo">Revocado</span>' : '<span class="tag resuelto">Activo</span>'}</td>
+        <td>${u.revoked_at ? '' : `<button class="secondary btn-revoke" data-id="${u.user_id}">Revocar</button>`}</td>
+      </tr>
+    `).join('');
     listEl.innerHTML = `
       <table>
-        <tr><th>Dispositivo</th><th>Vinculado</th><th>Estado</th><th></th></tr>
-        ${data.devices.map((d) => `
-          <tr>
-            <td>${d.device_name}</td>
-            <td>${new Date(d.paired_at).toLocaleString('es-AR')}</td>
-            <td>${d.revoked_at ? '<span class="tag nuevo">Revocado</span>' : '<span class="tag resuelto">Activo</span>'}</td>
-            <td>${d.revoked_at ? '' : `<button class="secondary btn-revoke" data-id="${d.device_id}">Revocar</button>`}</td>
-          </tr>
-        `).join('')}
+        <tr><th>Persona</th><th>Rol</th><th>Vinculado</th><th>Estado</th><th></th></tr>
+        ${filasPersonas}${filasPendientes}
       </table>
     `;
     listEl.querySelectorAll('.btn-revoke').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        const ok = await showConfirm('Revocar este dispositivo', 'Deja de poder enviar tareas de inmediato -- se puede volver a vincular después con un código nuevo.', { confirmLabel: 'Revocar', danger: true });
+        const ok = await showConfirm('Revocar acceso', 'Esta persona pierde el acceso a NicOS de inmediato -- va a necesitar un código nuevo para volver a vincularse.', { confirmLabel: 'Revocar', danger: true });
         if (!ok) return;
-        await fetch(`${apiBase}/api/v1/devices/${btn.dataset.id}/revoke`, { method: 'POST' });
-        showToast('Dispositivo revocado.');
+        await fetch(`${apiBase}/api/v1/users/${btn.dataset.id}/revoke`, { method: 'POST' });
+        showToast('Acceso revocado.');
+        loadDevices();
+      });
+    });
+    listEl.querySelectorAll('.btn-cancel-code').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        await fetch(`${apiBase}/api/v1/pairing/${btn.dataset.code}/cancel`, { method: 'POST' });
+        showToast('Código cancelado.');
         loadDevices();
       });
     });
   }
 
   containerEl.querySelector('#btn-start-pairing').addEventListener('click', async () => {
-    const res = await fetch(`${apiBase}/api/v1/pairing/start`, { method: 'POST' });
-    const data = await res.json();
+    const displayName = containerEl.querySelector('#nueva-persona-nombre').value.trim();
+    const role = containerEl.querySelector('#nueva-persona-rol').value;
+    const turno = containerEl.querySelector('#nueva-persona-turno').value;
     const el = containerEl.querySelector('#pairing-code-display');
+    if (!displayName) {
+      el.innerHTML = `<span style="color:var(--red);">Falta el nombre.</span>`;
+      return;
+    }
+    const res = await fetch(`${apiBase}/api/v1/pairing/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role, turno: turno || null, display_name: displayName }),
+    });
+    const data = await res.json();
     if (data.ok) {
-      el.innerHTML = `Código: <b style="font-size:20px; letter-spacing:2px;">${data.code}</b> — válido 5 minutos. Ingresalo en la PC de Marianela.`;
+      el.innerHTML = `Código: <b style="font-size:20px; letter-spacing:2px;">${data.code}</b> — válido 5 minutos. Decíselo a ${displayName} para que lo escriba en su PC.`;
+      loadDevices();
     } else {
       el.innerHTML = `<span style="color:var(--red);">${data.error}</span>`;
     }

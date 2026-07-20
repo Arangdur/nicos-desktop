@@ -1,21 +1,30 @@
-// Panel de Ajustes de la vista OPERATIVA. A propósito, este archivo NO tiene
-// ningún campo de API key ni credencial de Google — Marianela no puede cargar
-// esos datos ni por error, porque el formulario ni existe acá. Solo muestra
-// con qué Mac está vinculada esta PC y permite "olvidar" la vinculación.
+// Panel de Ajustes de las vistas no-Director (Operativa, Enfermero). A propósito,
+// este archivo NO tiene ningún campo de API key ni credencial de Google — nadie
+// puede cargar esos datos ni por error, porque el formulario ni existe acá.
+// Solo muestra quién sos (la persona con sesión activa) y con qué Mac está
+// vinculada esta PC, y permite "olvidar" tu propio acceso (no el de otras
+// personas que puedan compartir el mismo dispositivo, ver login.html).
 
 async function renderSettingsPanelOperativa(containerEl) {
   const current = await window.nicos.getMaskedSettings();
+  const identity = await window.nicos.identityActive();
   const outboxCount = await window.nicos.operativaOutboxCount();
+
+  const TURNO_LABEL = { manana: 'mañana', tarde: 'tarde', noche: 'noche', rotativo: 'rotativo' };
 
   containerEl.innerHTML = `
     <div class="card">
-      <h3>Vinculación con la Mac</h3>
+      <h3>Tu vinculación con la Mac</h3>
       <dl class="kv-grid">
-        <dt>Dispositivo</dt><dd>${current.PAIRED_DEVICE_NAME || '—'}</dd>
+        <dt>Persona</dt><dd>${identity ? identity.display_name : '—'}</dd>
+        ${identity && identity.turno ? `<dt>Turno</dt><dd>${TURNO_LABEL[identity.turno] || identity.turno}</dd>` : ''}
         <dt>Mac</dt><dd>${current.MAC_LAN_HOST || '—'}:${current.MAC_LAN_PORT || '—'}</dd>
         <dt>Tareas en espera de conexión</dt><dd>${outboxCount}</dd>
       </dl>
-      <button class="danger" id="btn-forget-pairing" style="margin-top:var(--space-4);">Olvidar vinculación</button>
+      <div class="row-wrap" style="margin-top:var(--space-4);">
+        <button class="secondary" id="btn-switch-persona">Cambiar de persona</button>
+        <button class="danger" id="btn-forget-identity">Olvidar mi acceso</button>
+      </div>
     </div>
     <p class="help-text">
       Esta PC nunca guarda claves de IA ni credenciales de Google — esas viven solo
@@ -23,10 +32,18 @@ async function renderSettingsPanelOperativa(containerEl) {
     </p>
   `;
 
-  containerEl.querySelector('#btn-forget-pairing').addEventListener('click', async () => {
-    const ok = await showConfirm('Olvidar vinculación', 'Esta PC deja de estar conectada a la Mac de Nicolás -- vas a tener que vincularla de nuevo con un código.', { confirmLabel: 'Olvidar', danger: true });
-    if (!ok) return;
-    await window.nicos.operativaForgetPairing();
-    await window.nicos.setRole('operativa'); // fuerza a re-bootear -> vuelve a pairing.html
+  containerEl.querySelector('#btn-switch-persona').addEventListener('click', async () => {
+    await window.nicos.identityLogout();
+  });
+
+  containerEl.querySelector('#btn-forget-identity').addEventListener('click', async () => {
+    const ok = await showConfirm(
+      'Olvidar mi acceso',
+      'Vas a tener que pedirle a Nicolás un código nuevo para volver a vincularte -- esto no afecta a otras personas vinculadas en esta misma PC.',
+      { confirmLabel: 'Olvidar', danger: true },
+    );
+    if (!ok || !identity) return;
+    await window.nicos.identityForget(identity.user_id);
+    await window.nicos.identityLogout();
   });
 }

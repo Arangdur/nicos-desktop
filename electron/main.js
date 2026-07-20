@@ -53,14 +53,32 @@ async function _bootAndLoad() {
   const query = new URLSearchParams({ port: port || '', role: role || '' }).toString();
 
   if (!role) {
+    // Elección de MÁQUINA, una sola vez: ¿esta PC es la Mac de Nicolás o no?
     mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'shared', 'selector.html'), { search: query });
   } else if (role === 'director') {
     mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'director', 'index.html'), { search: query });
-  } else if (!config.PAIRED_DEVICE_TOKEN) {
-    // Operativa sin vincular todavía -> pantalla de pairing, no la app directamente.
-    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'operativa', 'pairing.html'), { search: query });
   } else {
+    // v0.2.2 -- toda PC no-Director pasa SIEMPRE por el login de persona
+    // primero (¿quién sos, de las ya vinculadas acá? / soy nuevo, tengo un
+    // código) -- nunca salta directo a la app real, ni siquiera si ya hay
+    // identidades guardadas, porque en un dispositivo compartido (ej. la PC
+    // de enfermería) puede haber más de una persona y cada arranque hay que
+    // preguntar de nuevo quién lo está usando ahora.
+    operativaClient.logout();
+    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'shared', 'login.html'), { search: query });
+  }
+}
+
+function _loadRoleScreen(role) {
+  const query = new URLSearchParams({ role: role || '' }).toString();
+  if (role === 'operativa') {
     mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'operativa', 'index.html'), { search: query });
+  } else if (role === 'enfermero') {
+    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'enfermero', 'index.html'), { search: query });
+  } else {
+    // Rol desconocido -- no debería pasar (login.js solo llega acá tras un
+    // login/alta exitoso), pero si pasa, mejor volver al login que romper.
+    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'shared', 'login.html'));
   }
 }
 
@@ -184,13 +202,34 @@ ipcMain.handle('nicos:get-about-info', async () => {
   return info;
 });
 
-// ---- IPC exclusivo de la vista Operativa (el token nunca sale de main process) ----
+// ---- IPC de identidad (login/alta) -- el token nunca sale de main process ----
+// v0.2.2 -- reemplaza el viejo par pairing/forget-pairing de un solo token por
+// operaciones sobre la LISTA de identidades de esta PC (ver operativa-client.js).
 
-ipcMain.handle('nicos:operativa-pair', async (_event, { host, port, code, deviceName }) => {
-  await operativaClient.pairWithMac(host, port, code, deviceName);
-  if (mainWindow) await _bootAndLoad();
+ipcMain.handle('nicos:identity-list', () => operativaClient.listIdentities());
+ipcMain.handle('nicos:identity-active', () => operativaClient.getActiveIdentity());
+
+ipcMain.handle('nicos:identity-complete-alta', async (_event, payload) => {
+  const result = await operativaClient.completeAlta(payload);
+  if (mainWindow) _loadRoleScreen(result.role);
+  return result;
+});
+
+ipcMain.handle('nicos:identity-login', async (_event, { userId, pin }) => {
+  const result = await operativaClient.loginWithPin(userId, pin);
+  if (result.ok && mainWindow) _loadRoleScreen(result.role);
+  return result;
+});
+
+ipcMain.handle('nicos:identity-forget', (_event, userId) => operativaClient.forgetIdentity(userId));
+
+ipcMain.handle('nicos:identity-logout', async () => {
+  operativaClient.logout();
+  if (mainWindow) mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'shared', 'login.html'));
   return { ok: true };
 });
+
+// ---- IPC exclusivo de las vistas no-Director (Operativa, Enfermero) ----
 
 ipcMain.handle('nicos:operativa-submit-task', (_event, rawText) => operativaClient.submitTask(rawText));
 ipcMain.handle('nicos:operativa-list-tasks', () => operativaClient.listTasks());
@@ -199,8 +238,3 @@ ipcMain.handle('nicos:operativa-outbox-count', () => operativaClient.getOutboxCo
 ipcMain.handle('nicos:operativa-list-messages', () => operativaClient.listMessages());
 ipcMain.handle('nicos:operativa-update-message', (_event, { row, updates }) =>
   operativaClient.updateMessage(row, updates));
-
-ipcMain.handle('nicos:operativa-forget-pairing', () => {
-  settingsStore.clearOperativaPairing();
-  return { ok: true };
-});

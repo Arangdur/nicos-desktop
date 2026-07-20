@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>NicOS Desktop — Iniciar sesión</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  .welcome-wrap { max-width: 480px; margin: 0 auto; padding: 60px 20px; }
+  .welcome-logo { text-align: center; margin-bottom: var(--space-5); }
+  .welcome-logo .title { font-size: 22px; font-weight: 700; }
+  .welcome-logo .subtitle { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .switch-row { display: flex; gap: 4px; background: var(--navy-soft); border-radius: 10px; padding: 4px; margin-bottom: var(--space-4); }
+  .switch-btn { flex: 1; padding: 10px; text-align: center; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; color: var(--muted); border: none; background: none; }
+  .switch-btn.active { background: white; color: var(--navy); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .persona-pick { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; margin-bottom: 8px; }
+  .persona-pick:hover { border-color: var(--navy); }
+  .avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--navy); color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+  .persona-pick .p-nombre { font-weight: 600; font-size: 14px; }
+  .persona-pick .p-rol { font-size: 12px; color: var(--muted); }
+  .pin-pad-input { text-align: center; letter-spacing: 8px; font-size: 20px; max-width: 200px; margin: var(--space-3) auto 0; display: block; }
+  .panel { display: none; }
+  .panel.open { display: block; }
+  .otra-persona-link { text-align: center; font-size: 13px; color: var(--muted); margin-top: var(--space-3); cursor: pointer; text-decoration: underline; }
+</style>
+</head>
+<body style="background: var(--bg-page);">
+  <div class="welcome-wrap">
+    <div class="welcome-logo">
+      <div class="title">NicOS Desktop</div>
+      <div class="subtitle">Centralizador de Nicolás Buso</div>
+    </div>
+
+    <div class="switch-row" id="switch-row">
+      <button type="button" class="switch-btn" data-panel="login">Ya tengo cuenta</button>
+      <button type="button" class="switch-btn" data-panel="alta">Soy nuevo — tengo un código</button>
+    </div>
+
+    <div class="card panel" id="panel-login">
+      <h3 style="margin-bottom:4px;">¿Quién sos?</h3>
+      <p class="help-text" style="margin-bottom:var(--space-3);">Elegí tu nombre para continuar.</p>
+      <div id="lista-personas-login"></div>
+      <div class="otra-persona-link" id="link-otra-persona">Mi nombre no está en la lista</div>
+    </div>
+
+    <div class="card panel" id="panel-pin">
+      <button class="secondary" id="btn-volver-login" style="padding:6px 10px; font-size:12px; margin-bottom:var(--space-3);">&larr; Volver</button>
+      <h3 id="pin-nombre" style="margin-bottom:4px;">Hola</h3>
+      <p class="help-text" style="margin-bottom:var(--space-3);">Ingresá tu PIN de 4 dígitos para confirmar que sos vos.</p>
+      <input type="password" id="pin-input" maxlength="4" inputmode="numeric" placeholder="····" class="pin-pad-input">
+      <div id="pin-status" style="text-align:center; margin-top:var(--space-2); font-size:13px;"></div>
+      <button class="primary" id="btn-entrar" style="width:100%; margin-top:var(--space-4);">Entrar</button>
+    </div>
+
+    <div class="card panel" id="panel-alta">
+      <h3 style="margin-bottom:4px;">Alta con código</h3>
+      <p class="help-text" style="margin-bottom:var(--space-3);">Nicolás te tiene que haber dado un código de 6 dígitos (válido 5 minutos). Si no lo tenés, pedíselo antes de seguir.</p>
+
+      <label>Tu nombre completo</label>
+      <input type="text" id="alta-nombre" placeholder="Ej. Daniela Fernández">
+
+      <label style="margin-top:var(--space-3);">DNI</label>
+      <input type="text" id="alta-dni" placeholder="Ej. 30123456" inputmode="numeric">
+
+      <div class="row-wrap" style="margin-top:var(--space-3); align-items:flex-end;">
+        <div style="flex:1;">
+          <label>Fecha de nacimiento</label>
+          <input type="date" id="alta-nacimiento">
+        </div>
+      </div>
+
+      <label style="margin-top:var(--space-3);">Sexo</label>
+      <select id="alta-sexo">
+        <option value="">Elegí una opción</option>
+        <option value="F">Femenino</option>
+        <option value="M">Masculino</option>
+        <option value="X">Otro</option>
+        <option value="NC">Prefiero no decir</option>
+      </select>
+
+      <label style="margin-top:var(--space-3);">Elegí un PIN de 4 dígitos</label>
+      <input type="password" id="alta-pin" maxlength="4" inputmode="numeric" placeholder="····" style="max-width:120px; letter-spacing:6px; text-align:center;">
+      <p class="help-text" style="margin-top:4px;">No es una contraseña de seguridad -- solo evita que se cargue algo a tu nombre por error en un dispositivo compartido.</p>
+
+      <label style="margin-top:var(--space-3);">Código de 6 dígitos</label>
+      <input type="text" id="alta-codigo" placeholder="000000" maxlength="6" inputmode="numeric">
+
+      <div id="campo-ip">
+        <label style="margin-top:var(--space-3);">IP de Tailscale de la Mac de Nicolás</label>
+        <input type="text" id="alta-ip" placeholder="100.x.y.z">
+      </div>
+
+      <div id="alta-status" style="margin-top:var(--space-3); font-size:13px;"></div>
+
+      <button class="primary" id="btn-completar-alta" style="width:100%; margin-top:var(--space-4);">Completar alta</button>
+    </div>
+  </div>
+
+<script src="ui-helpers.js"></script>
+<script src="login.js"></script>
+</body>
+</html>

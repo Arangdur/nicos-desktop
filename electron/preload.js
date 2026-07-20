@@ -11,13 +11,17 @@ contextBridge.exposeInMainWorld('nicos', {
   getSidecarPort: () => ipcRenderer.invoke('nicos:get-sidecar-port'),
   getAboutInfo: () => ipcRenderer.invoke('nicos:get-about-info'),
 
-  operativaPair: (host, port, code, deviceName) =>
-    ipcRenderer.invoke('nicos:operativa-pair', { host, port, code, deviceName }),
+  identityList: () => ipcRenderer.invoke('nicos:identity-list'),
+  identityActive: () => ipcRenderer.invoke('nicos:identity-active'),
+  identityCompleteAlta: (payload) => ipcRenderer.invoke('nicos:identity-complete-alta', payload),
+  identityLogin: (userId, pin) => ipcRenderer.invoke('nicos:identity-login', { userId, pin }),
+  identityForget: (userId) => ipcRenderer.invoke('nicos:identity-forget', userId),
+  identityLogout: () => ipcRenderer.invoke('nicos:identity-logout'),
+
   operativaSubmitTask: (rawText) => ipcRenderer.invoke('nicos:operativa-submit-task', rawText),
   operativaListTasks: () => ipcRenderer.invoke('nicos:operativa-list-tasks'),
   operativaFlushOutbox: () => ipcRenderer.invoke('nicos:operativa-flush-outbox'),
   operativaOutboxCount: () => ipcRenderer.invoke('nicos:operativa-outbox-count'),
-  operativaForgetPairing: () => ipcRenderer.invoke('nicos:operativa-forget-pairing'),
   operativaListMessages: () => ipcRenderer.invoke('nicos:operativa-list-messages'),
   operativaUpdateMessage: (row, updates) => ipcRenderer.invoke('nicos:operativa-update-message', { row, updates }),
 });

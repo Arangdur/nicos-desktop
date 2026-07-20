@@ -3,11 +3,20 @@
 // Perfil Director (Nicolás, Mac): TODOS los secretos de IA/Google viven acá,
 // cifrados con safeStorage (Keychain). Es el único perfil con esta capacidad.
 //
-// Perfil Operativa (Marianela, Windows): NUNCA guarda ninguna API key ni
-// credencial de Google — solo el token de dispositivo emitido por el pairing
-// (también cifrado con safeStorage/DPAPI) y la dirección LAN de la Mac. No hay
-// forma de que un secreto termine en esta máquina porque el código ni siquiera
-// tiene un campo para escribirlo (ver settings-panel-operativa.js).
+// Perfil "operativa" a nivel de MÁQUINA (Windows/PC que no es la de Nicolás —
+// puede ser Marianela, o la PC de enfermería de Abate compartida entre varias
+// personas): NUNCA guarda ninguna API key ni credencial de Google — solo
+// identidades de personas vinculadas (ver IDENTITIES_JSON) y la dirección LAN
+// de la Mac. No hay forma de que un secreto termine en esta máquina porque el
+// código ni siquiera tiene un campo para escribirlo (ver settings-panel-operativa.js).
+//
+// v0.2.2 -- antes había UN token por instalación (PAIRED_DEVICE_TOKEN). Ahora
+// una misma PC puede tener VARIAS personas vinculadas (ej. Carlos y María
+// comparten la PC de enfermería, con continuidad de turno) -- cada una con su
+// propio código, su propio token, su propia ficha. IDENTITIES_JSON reemplaza
+// los campos PAIRED_DEVICE_* singulares. Proyecto pre-lanzamiento (todavía sin
+// datos productivos reales de Operativa) -- es un cambio limpio, no una
+// migración de settings viejos.
 const { app, safeStorage } = require('electron');
 const fs = require('fs');
 const path = require('path');
@@ -21,10 +30,11 @@ const DIRECTOR_SECRET_KEYS = [
 ];
 const DIRECTOR_PLAIN_KEYS = ['WHATSAPP_SHEET_ID', 'ANTHROPIC_MODEL', 'OPENAI_MODEL', 'TAILSCALE_IP'];
 
-// El token de dispositivo ES un secreto (da acceso a la Mac) — se cifra igual
-// que las API keys, aunque conceptualmente sea "de otro tipo".
-const OPERATIVA_SECRET_KEYS = ['PAIRED_DEVICE_TOKEN'];
-const OPERATIVA_PLAIN_KEYS = ['MAC_LAN_HOST', 'MAC_LAN_PORT', 'PAIRED_DEVICE_ID', 'PAIRED_DEVICE_NAME'];
+// IDENTITIES_JSON contiene los tokens de TODAS las personas vinculadas a esta
+// PC -- por eso se cifra igual que las API keys, aunque conceptualmente sea
+// "de otro tipo" (un array serializado, no un secreto simple).
+const OPERATIVA_SECRET_KEYS = ['IDENTITIES_JSON'];
+const OPERATIVA_PLAIN_KEYS = ['MAC_LAN_HOST', 'MAC_LAN_PORT'];
 
 const COMMON_PLAIN_KEYS = ['role'];
 
@@ -129,6 +139,43 @@ function saveSettings(update) {
   _writeRaw(raw);
 }
 
+// ---- Identidades (v0.2.2) -------------------------------------------------
+// Cada identidad: { user_id, display_name, role, turno, device_id, device_name,
+// token, pin_hash_local }. `token` y `pin_hash_local` viajan dentro del blob
+// cifrado IDENTITIES_JSON -- nunca en texto plano en disco. `pin_hash_local`
+// es un hash SHA-256 calculado en el cliente a partir del PIN que la persona
+// tipeó en su alta -- el login por PIN se verifica OFFLINE, a propósito (ver
+// operativa-client.loginWithPin): si tuviera que consultar a la Mac cada vez,
+// alguien legítimamente vinculado no podría ni abrir la app cuando la Mac de
+// Nicolás está apagada/dormida, rompiendo el diseño de "cola local si no hay
+// conexión" que ya existía para el envío de tareas.
+
+function getIdentities() {
+  const config = getDecryptedConfig();
+  if (!config.IDENTITIES_JSON) return [];
+  try {
+    return JSON.parse(config.IDENTITIES_JSON);
+  } catch (e) {
+    console.error('[settings-store] IDENTITIES_JSON corrupto:', e);
+    return [];
+  }
+}
+
+function _setIdentities(list) {
+  saveSettings({ role: 'operativa', IDENTITIES_JSON: JSON.stringify(list) });
+}
+
+function addIdentity(identity) {
+  const list = getIdentities().filter((i) => i.user_id !== identity.user_id);
+  list.push(identity);
+  _setIdentities(list);
+}
+
+function removeIdentity(userId) {
+  const list = getIdentities().filter((i) => i.user_id !== userId);
+  _setIdentities(list);
+}
+
 function clearOperativaPairing() {
   const raw = _readRaw();
   for (const key of [...OPERATIVA_SECRET_KEYS, ...OPERATIVA_PLAIN_KEYS]) {
@@ -139,5 +186,6 @@ function clearOperativaPairing() {
 
 module.exports = {
   getRole, getDecryptedConfig, getMaskedConfig, saveSettings, clearOperativaPairing,
+  getIdentities, addIdentity, removeIdentity,
   DIRECTOR_SECRET_KEYS, DIRECTOR_PLAIN_KEYS, OPERATIVA_SECRET_KEYS, OPERATIVA_PLAIN_KEYS,
 };

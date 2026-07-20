@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>NicOS Desktop — Enfermería</title>
+  <link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+  <div class="banner">
+    <div>
+      <div class="title">NicOS Desktop</div>
+      <div class="subtitle" id="banner-subtitle">Enfermería de Abate</div>
+    </div>
+    <span class="badge">vinculado</span>
+  </div>
+
+  <div class="container">
+    <div class="tabs">
+      <button class="tab" data-tab="novedades">Novedades</button>
+      <button class="tab" data-tab="ajustes">Ajustes</button>
+      <button class="tab" data-tab="acerca-de">Acerca de</button>
+    </div>
+
+    <div id="tab-novedades" class="tab-panel"></div>
+    <div id="tab-ajustes" class="tab-panel" style="display:none;"></div>
+    <div id="tab-acerca-de" class="tab-panel" style="display:none;"></div>
+  </div>
+
+  <script src="../shared/ui-helpers.js"></script>
+  <script src="../shared/settings-panel-operativa.js"></script>
+  <script src="../shared/about-panel.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

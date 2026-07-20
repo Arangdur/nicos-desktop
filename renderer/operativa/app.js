@@ -154,15 +154,14 @@ async function init() {
   const statusEl = document.getElementById('server-status');
   statusEl.textContent = 'vinculado';
 
-  // El header decía "Consultorio" fijo, sin importar el nombre real del
-  // dispositivo -- placeholder que quedó del desarrollo inicial. Ahora
-  // refleja el nombre real puesto al vincular (settings-store.js, campo
-  // PAIRED_DEVICE_NAME, plano -- no es un secreto).
+  // El header decía "Consultorio" fijo, sin importar quién está usando la
+  // app -- ahora refleja el nombre real de la PERSONA que inició sesión
+  // (v0.2.2: una PC puede tener varias identidades vinculadas, ver login.js).
   try {
-    const settings = await window.nicos.getMaskedSettings();
+    const identity = await window.nicos.identityActive();
     const subtitleEl = document.getElementById('banner-subtitle');
-    if (subtitleEl && settings.PAIRED_DEVICE_NAME) {
-      subtitleEl.textContent = `Operativa · ${settings.PAIRED_DEVICE_NAME}`;
+    if (subtitleEl && identity && identity.display_name) {
+      subtitleEl.textContent = `Operativa · ${identity.display_name}`;
     }
   } catch (e) { /* no bloquea el resto de la vista si esto falla */ }
 
