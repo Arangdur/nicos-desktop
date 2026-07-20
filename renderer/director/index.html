@@ -7,17 +7,20 @@
 </head>
 <body>
   <div class="banner">
-    <span class="title">NicOS Desktop · Director</span>
+    <div>
+      <div class="title">NicOS Desktop</div>
+      <div class="subtitle">Director</div>
+    </div>
     <span class="badge" id="server-status">conectando...</span>
   </div>
 
   <div class="container">
-    <div style="display:flex; gap:10px; margin-bottom:18px;">
-      <button class="secondary" data-tab="resumen">Resumen</button>
-      <button class="secondary" data-tab="tareas">Tareas <span id="badge-pending-count"></span></button>
-      <button class="secondary" data-tab="chat">Chat</button>
-      <button class="secondary" data-tab="ajustes">Ajustes</button>
-      <button class="secondary" data-tab="acerca-de">Acerca de</button>
+    <div class="tabs">
+      <button class="tab" data-tab="resumen">Resumen</button>
+      <button class="tab" data-tab="tareas">Tareas <span id="badge-pending-count"></span></button>
+      <button class="tab" data-tab="chat">Chat</button>
+      <button class="tab" data-tab="ajustes">Ajustes</button>
+      <button class="tab" data-tab="acerca-de">Acerca de</button>
     </div>
 
     <div id="tab-resumen" class="tab-panel"></div>
@@ -27,6 +30,7 @@
     <div id="tab-acerca-de" class="tab-panel" style="display:none;"></div>
   </div>
 
+  <script src="../shared/ui-helpers.js"></script>
   <script src="../shared/settings-panel-director.js"></script>
   <script src="../shared/about-panel.js"></script>
   <script src="tasks-tab.js"></script>

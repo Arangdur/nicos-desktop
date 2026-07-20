@@ -8,12 +8,12 @@ async function loadEntradaRapida() {
   el.innerHTML = `
     <div class="card">
       <h3>Registrar algo</h3>
-      <p style="font-size:13px; color:var(--muted);">
+      <p class="help-text">
         Escribí con tus palabras — por ejemplo "Registrar pago de electricidad de Abate por $450.000"
         o "Cargá un ingreso de $1.200.000 de Hospital Posse". NicOS decide a dónde va.
       </p>
       <textarea id="entrada-texto" rows="3" placeholder="Contame qué pasó..."></textarea>
-      <div id="entrada-status" style="font-size:13px; margin:10px 0;"></div>
+      <div id="entrada-status" style="font-size:var(--text-sm); margin:var(--space-3) 0;"></div>
       <button class="primary" id="btn-enviar-entrada">Enviar</button>
     </div>
     <div class="card">
@@ -79,10 +79,15 @@ async function loadMisTareas() {
     ready: 'Lista', executing: 'Ejecutando', completed: 'Completada',
     failed: 'Falló', needs_review: 'Nicolás la va a revisar', cancelled: 'Cancelada',
   };
+  const ESTADO_TAG_CLASS = {
+    pending_approval: 'proceso', needs_information: 'proceso', needs_review: 'proceso',
+    completed: 'resuelto', ready: 'resuelto', executing: 'resuelto',
+    failed: 'nuevo', cancelled: 'nuevo',
+  };
   el.innerHTML = result.tasks.slice(0, 10).map((t) => `
-    <div style="padding:8px 0; border-bottom:1px solid var(--border); font-size:13px;">
-      <span class="tag proceso">${ESTADO_LABEL[t.state] || t.state}</span>
-      <span style="margin-left:8px;">${t.raw_text}</span>
+    <div class="row" style="padding:var(--space-2) 0; border-bottom:1px solid var(--border-soft); font-size:var(--text-sm);">
+      <span class="tag ${ESTADO_TAG_CLASS[t.state] || 'proceso'}">${ESTADO_LABEL[t.state] || t.state}</span>
+      <span>${t.raw_text}</span>
     </div>
   `).join('');
 }

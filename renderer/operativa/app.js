@@ -20,6 +20,9 @@ function escHtml(s) {
 function switchTab(name) {
   document.querySelectorAll('.tab-panel').forEach((el) => (el.style.display = 'none'));
   document.getElementById(`tab-${name}`).style.display = 'block';
+  document.querySelectorAll('[data-tab]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.tab === name);
+  });
 }
 document.querySelectorAll('[data-tab]').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -114,11 +117,11 @@ async function loadMensajes() {
     el.innerHTML = `
       <div class="card">
         <h3>Filtros</h3>
-        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <button class="secondary" data-filter="todos">Todos</button>
-          <button class="secondary" data-filter="nuevo">Sin resolver</button>
-          <button class="secondary" data-filter="urgente">Urgentes</button>
-          <button class="secondary" data-filter="resuelto">Resueltos</button>
+        <div class="row-wrap">
+          <button class="tab active" data-filter="todos">Todos</button>
+          <button class="tab" data-filter="nuevo">Sin resolver</button>
+          <button class="tab" data-filter="urgente">Urgentes</button>
+          <button class="tab" data-filter="resuelto">Resueltos</button>
         </div>
       </div>
       <div class="card"><div id="mensajes-tabla"></div></div>
@@ -126,6 +129,7 @@ async function loadMensajes() {
     el.querySelectorAll('[data-filter]').forEach((btn) => {
       btn.addEventListener('click', () => {
         currentFilter = btn.dataset.filter;
+        el.querySelectorAll('[data-filter]').forEach((b) => b.classList.toggle('active', b === btn));
         renderTable();
       });
     });
@@ -149,6 +153,18 @@ function loadAjustes() {
 async function init() {
   const statusEl = document.getElementById('server-status');
   statusEl.textContent = 'vinculado';
+
+  // El header decía "Consultorio" fijo, sin importar el nombre real del
+  // dispositivo -- placeholder que quedó del desarrollo inicial. Ahora
+  // refleja el nombre real puesto al vincular (settings-store.js, campo
+  // PAIRED_DEVICE_NAME, plano -- no es un secreto).
+  try {
+    const settings = await window.nicos.getMaskedSettings();
+    const subtitleEl = document.getElementById('banner-subtitle');
+    if (subtitleEl && settings.PAIRED_DEVICE_NAME) {
+      subtitleEl.textContent = `Operativa · ${settings.PAIRED_DEVICE_NAME}`;
+    }
+  } catch (e) { /* no bloquea el resto de la vista si esto falla */ }
 
   await loadEntradaRapida();
   loadAjustes();

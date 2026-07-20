@@ -25,6 +25,9 @@ async function fetchJson(path, opts) {
 function switchTab(name) {
   document.querySelectorAll('.tab-panel').forEach((el) => (el.style.display = 'none'));
   document.getElementById(`tab-${name}`).style.display = 'block';
+  document.querySelectorAll('[data-tab]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.tab === name);
+  });
 }
 
 document.querySelectorAll('[data-tab]').forEach((btn) => {
@@ -57,26 +60,28 @@ async function loadResumen() {
     <div class="card">
       <h3>Trading Bot</h3>
       ${tb._missing ? '<div class="empty">Sin datos (falta trading-bot-resumen.json).</div>' : `
-        <table>
-          <tr><td>PnL total</td><td>${fmtNum(tb.pnl_total)} USDT</td></tr>
-          <tr><td>Trades</td><td>${fmtNum(tb.trades)}</td></tr>
-          <tr><td>Win rate</td><td>${fmtNum(tb.win_rate)}%</td></tr>
-          <tr><td>Drawdown máximo</td><td>${escHtml(tb.drawdown_max)}</td></tr>
-          <tr><td>Régimen</td><td>${escHtml(tb.regimen)}</td></tr>
-          <tr><td>Última actividad</td><td>${escHtml(tb.ultima_actividad)}</td></tr>
-        </table>
+        <div class="metric-grid">
+          <div class="metric"><div class="metric-label">PnL total</div><div class="metric-value">${fmtNum(tb.pnl_total)} <span style="font-size:13px; font-weight:500; color:var(--muted);">USDT</span></div></div>
+          <div class="metric"><div class="metric-label">Trades</div><div class="metric-value">${fmtNum(tb.trades)}</div></div>
+          <div class="metric"><div class="metric-label">Win rate</div><div class="metric-value">${fmtNum(tb.win_rate)}%</div></div>
+          <div class="metric"><div class="metric-label">Drawdown máx.</div><div class="metric-value">${escHtml(tb.drawdown_max)}</div></div>
+        </div>
+        <dl class="kv-grid" style="margin-top:16px;">
+          <dt>Régimen</dt><dd>${escHtml(tb.regimen)}</dd>
+          <dt>Última actividad</dt><dd>${escHtml(tb.ultima_actividad)}</dd>
+        </dl>
       `}
     </div>
 
     <div class="card">
       <h3>Consultorio (agregado, sin datos de pacientes)</h3>
       ${cons._missing ? '<div class="empty">Sin datos (falta consultorio-resumen.json).</div>' : `
-        <table>
-          <tr><td>Total consultas</td><td>${fmtNum(cons.total_consultas)}</td></tr>
-          <tr><td>Clínica general</td><td>${fmtNum(cons.clinica_general)}</td></tr>
-          <tr><td>Psiquiatría</td><td>${fmtNum(cons.psiquiatria)}</td></tr>
-          <tr><td>Pendientes DRAPP</td><td>${fmtNum(cons.pendientes_drapp)}</td></tr>
-        </table>
+        <div class="metric-grid">
+          <div class="metric"><div class="metric-label">Total consultas</div><div class="metric-value">${fmtNum(cons.total_consultas)}</div></div>
+          <div class="metric"><div class="metric-label">Clínica general</div><div class="metric-value">${fmtNum(cons.clinica_general)}</div></div>
+          <div class="metric"><div class="metric-label">Psiquiatría</div><div class="metric-value">${fmtNum(cons.psiquiatria)}</div></div>
+          <div class="metric"><div class="metric-label">Pendientes DRAPP</div><div class="metric-value">${fmtNum(cons.pendientes_drapp)}</div></div>
+        </div>
       `}
     </div>
 
@@ -114,12 +119,12 @@ function loadChat() {
   el.innerHTML = `
     <div class="card">
       <h3>Chat del Director</h3>
-      <div style="margin-bottom:10px;">
-        <label style="display:inline-block; margin-right:12px;">
-          <input type="radio" name="brain" value="claude" checked> Claude
+      <div class="row-wrap" style="margin-bottom:var(--space-3);">
+        <label style="display:inline-flex; align-items:center; gap:6px; text-transform:none; font-weight:400; font-size:var(--text-base); color:var(--text); margin:0;">
+          <input type="radio" name="brain" value="claude" checked style="width:auto;"> Claude
         </label>
-        <label style="display:inline-block;">
-          <input type="radio" name="brain" value="openai"> ChatGPT
+        <label style="display:inline-flex; align-items:center; gap:6px; text-transform:none; font-weight:400; font-size:var(--text-base); color:var(--text); margin:0;">
+          <input type="radio" name="brain" value="openai" style="width:auto;"> ChatGPT
         </label>
       </div>
       <div class="chat-log" id="chat-log"></div>
@@ -201,7 +206,12 @@ async function init() {
   switchTab('resumen');
 
   setInterval(() => {
-    if (document.getElementById('tab-tareas').style.display !== 'none') {
+    // Si hay un detalle de tarea abierto, no se reconstruye toda la lista --
+    // antes esto cerraba de golpe cualquier detalle abierto (y tiraba el
+    // scroll arriba) cada 15s mientras alguien estaba mirando/por aprobar
+    // algo. Solo se refresca sin nada abierto, o se actualiza el contador.
+    const hayDetalleAbierto = !!document.querySelector('.task-detail[style*="display: block"]');
+    if (document.getElementById('tab-tareas').style.display !== 'none' && !hayDetalleAbierto) {
       renderTasksList();
     } else {
       // igual actualizar el contador del badge aunque no estemos parados en la pestaña

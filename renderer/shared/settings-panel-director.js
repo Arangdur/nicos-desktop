@@ -16,7 +16,7 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
       <label>Modelo de Anthropic</label>
       <input type="text" id="anthropic-model" value="${current.ANTHROPIC_MODEL || 'claude-sonnet-5'}">
 
-      <label style="margin-top:16px;">API key de OpenAI (ChatGPT) ${current.OPENAI_API_KEY_configurado ? '— ya configurada ✓' : '— falta configurar'}</label>
+      <label>API key de OpenAI (ChatGPT) ${current.OPENAI_API_KEY_configurado ? '— ya configurada ✓' : '— falta configurar'}</label>
       <input type="password" id="openai-key" placeholder="sk-...">
       <label>Modelo de OpenAI</label>
       <input type="text" id="openai-model" value="${current.OPENAI_MODEL || 'gpt-5'}">
@@ -24,7 +24,7 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
 
     <div class="card">
       <h3>Red — Tailscale</h3>
-      <p style="font-size:13px; color:var(--muted);">
+      <p class="help-text">
         La PC de Marianela se conecta a través de Tailscale, nunca por la red WiFi de la
         oficina en claro. Necesitás tener Tailscale instalado y logueado en esta Mac
         (<code>brew install tailscale && sudo tailscale up</code>), y después pegar acá
@@ -42,18 +42,20 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
       <textarea id="google-creds" rows="6" placeholder='{"type": "service_account", ...}'></textarea>
     </div>
 
-    <div id="settings-status" style="font-size:13px; margin-bottom:10px;"></div>
-    <button class="primary" id="btn-save-settings">Guardar</button>
+    <div class="row" style="margin-bottom:var(--space-4);">
+      <button class="primary" id="btn-save-settings">Guardar</button>
+      <span id="settings-status" style="font-size:var(--text-sm);"></span>
+    </div>
 
-    <div class="card" style="margin-top:24px;">
+    <div class="card">
       <h3>Dispositivos vinculados (PC de Marianela y otros)</h3>
-      <p style="font-size:13px; color:var(--muted);">
+      <p class="help-text">
         Estos dispositivos pueden enviar tareas por la red local — nunca tienen tus claves
         de IA ni de Google, solo un token revocable.
       </p>
       <button class="secondary" id="btn-start-pairing">Vincular nuevo dispositivo</button>
-      <div id="pairing-code-display" style="margin:12px 0; font-size:14px;"></div>
-      <div id="devices-list" style="margin-top:12px;"></div>
+      <div id="pairing-code-display" style="margin:var(--space-3) 0; font-size:var(--text-base);"></div>
+      <div id="devices-list" style="margin-top:var(--space-3);"></div>
     </div>
   `;
 
@@ -122,7 +124,10 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
     `;
     listEl.querySelectorAll('.btn-revoke').forEach((btn) => {
       btn.addEventListener('click', async () => {
+        const ok = await showConfirm('Revocar este dispositivo', 'Deja de poder enviar tareas de inmediato -- se puede volver a vincular después con un código nuevo.', { confirmLabel: 'Revocar', danger: true });
+        if (!ok) return;
         await fetch(`${apiBase}/api/v1/devices/${btn.dataset.id}/revoke`, { method: 'POST' });
+        showToast('Dispositivo revocado.');
         loadDevices();
       });
     });

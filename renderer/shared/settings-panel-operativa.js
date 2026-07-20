@@ -10,20 +10,22 @@ async function renderSettingsPanelOperativa(containerEl) {
   containerEl.innerHTML = `
     <div class="card">
       <h3>Vinculación con la Mac</h3>
-      <table>
-        <tr><td>Dispositivo</td><td>${current.PAIRED_DEVICE_NAME || '—'}</td></tr>
-        <tr><td>Mac</td><td>${current.MAC_LAN_HOST || '—'}:${current.MAC_LAN_PORT || '—'}</td></tr>
-        <tr><td>Tareas en espera de conexión</td><td>${outboxCount}</td></tr>
-      </table>
-      <button class="secondary" id="btn-forget-pairing" style="margin-top:12px;">Olvidar vinculación</button>
+      <dl class="kv-grid">
+        <dt>Dispositivo</dt><dd>${current.PAIRED_DEVICE_NAME || '—'}</dd>
+        <dt>Mac</dt><dd>${current.MAC_LAN_HOST || '—'}:${current.MAC_LAN_PORT || '—'}</dd>
+        <dt>Tareas en espera de conexión</dt><dd>${outboxCount}</dd>
+      </dl>
+      <button class="danger" id="btn-forget-pairing" style="margin-top:var(--space-4);">Olvidar vinculación</button>
     </div>
-    <p style="font-size:12px; color:var(--muted); margin-top:10px;">
+    <p class="help-text">
       Esta PC nunca guarda claves de IA ni credenciales de Google — esas viven solo
       en la Mac de Nicolás. Esta pantalla no tiene ni puede tener esos campos.
     </p>
   `;
 
   containerEl.querySelector('#btn-forget-pairing').addEventListener('click', async () => {
+    const ok = await showConfirm('Olvidar vinculación', 'Esta PC deja de estar conectada a la Mac de Nicolás -- vas a tener que vincularla de nuevo con un código.', { confirmLabel: 'Olvidar', danger: true });
+    if (!ok) return;
     await window.nicos.operativaForgetPairing();
     await window.nicos.setRole('operativa'); // fuerza a re-bootear -> vuelve a pairing.html
   });

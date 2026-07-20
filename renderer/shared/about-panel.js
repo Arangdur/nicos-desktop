@@ -28,12 +28,15 @@ async function renderAboutPanel(containerEl) {
   const build = info.build;
 
   const buildBlock = build ? `
-    <tr><td>Versión</td><td>${escHtmlAbout(build.version)}</td></tr>
-    <tr><td>Commit</td><td><code>${escHtmlAbout(build.commit_sha_short)}</code>${build.git_dirty ? ' <span class="tag nuevo">con cambios sin commitear</span>' : ''}</td></tr>
-    <tr><td>Fecha de build</td><td>${escHtmlAbout(new Date(build.build_date).toLocaleString('es-AR'))}</td></tr>
-    <tr><td>Hash de risk_policy.yaml</td><td><code style="font-size:11px;">${escHtmlAbout(build.risk_policy_sha256)}</code></td></tr>
+    <dl class="kv-grid">
+      <dt>Versión</dt><dd>${escHtmlAbout(build.version)}</dd>
+      <dt>Commit</dt><dd class="mono">${escHtmlAbout(build.commit_sha_short)}</dd>
+      ${build.git_dirty ? '<dt></dt><dd><span class="tag nuevo">con cambios sin commitear</span></dd>' : ''}
+      <dt>Fecha de build</dt><dd>${escHtmlAbout(new Date(build.build_date).toLocaleString('es-AR'))}</dd>
+      <dt>Hash de risk_policy.yaml</dt><dd class="mono">${escHtmlAbout(build.risk_policy_sha256)}</dd>
+    </dl>
   ` : `
-    <tr><td colspan="2"><div class="empty">Sin datos de compilación -- esto es normal corriendo desde el código fuente (npx electron .) en vez de un paquete instalado. Se genera con "npm run dist:mac" / "dist:win".</div></td></tr>
+    <div class="empty">Sin datos de compilación -- esto es normal corriendo desde el código fuente (npx electron .) en vez de un paquete instalado. Se genera con "npm run dist:mac" / "dist:win".</div>
   `;
 
   let coreBlock = '';
@@ -42,13 +45,13 @@ async function renderAboutPanel(containerEl) {
     if (core && core.ok) {
       coreBlock = `
         <h3>Core y Tailscale (esta Mac)</h3>
-        <table>
-          <tr><td>Core (sidecar)</td><td>${_boolTag(core.core_running, 'Activo', 'Detenido')}</td></tr>
-          <tr><td>Tailscale configurado</td><td>${_boolTag(core.tailscale_configured, 'Sí', 'No')}</td></tr>
-          <tr><td>Tailscale conectado</td><td>${_boolTag(core.tailscale_connected, 'Conectado', 'Desconectado')}</td></tr>
-          <tr><td>Política de riesgo</td><td>versión ${escHtmlAbout(core.policy_version)} — <code style="font-size:11px;">${escHtmlAbout(core.policy_hash)}</code></td></tr>
-          <tr><td>Python (sidecar)</td><td>${escHtmlAbout(core.python_version)}</td></tr>
-        </table>
+        <dl class="kv-grid">
+          <dt>Core (sidecar)</dt><dd>${_boolTag(core.core_running, 'Activo', 'Detenido')}</dd>
+          <dt>Tailscale configurado</dt><dd>${_boolTag(core.tailscale_configured, 'Sí', 'No')}</dd>
+          <dt>Tailscale conectado</dt><dd>${_boolTag(core.tailscale_connected, 'Conectado', 'Desconectado')}</dd>
+          <dt>Política de riesgo</dt><dd>versión ${escHtmlAbout(core.policy_version)} — <span class="mono">${escHtmlAbout(core.policy_hash)}</span></dd>
+          <dt>Python (sidecar)</dt><dd>${escHtmlAbout(core.python_version)}</dd>
+        </dl>
       `;
     } else {
       coreBlock = `
@@ -61,23 +64,21 @@ async function renderAboutPanel(containerEl) {
   containerEl.innerHTML = `
     <div class="card">
       <h3>NicOS Desktop</h3>
-      <table>
-        <tr><td>Edición</td><td>${escHtmlAbout(_rolLabel(info.role))}</td></tr>
-      </table>
+      <dl class="kv-grid"><dt>Edición</dt><dd>${escHtmlAbout(_rolLabel(info.role))}</dd></dl>
     </div>
 
     <div class="card">
       <h3>Versión y compilación</h3>
-      <table>${buildBlock}</table>
+      ${buildBlock}
     </div>
 
     <div class="card">
       <h3>Entorno de ejecución</h3>
-      <table>
-        <tr><td>Plataforma</td><td>${escHtmlAbout(info.platform)} / ${escHtmlAbout(info.arch)}</td></tr>
-        <tr><td>Electron</td><td>${escHtmlAbout(info.electron_version)}</td></tr>
-        <tr><td>Node</td><td>${escHtmlAbout(info.node_version)}</td></tr>
-      </table>
+      <dl class="kv-grid">
+        <dt>Plataforma</dt><dd>${escHtmlAbout(info.platform)} / ${escHtmlAbout(info.arch)}</dd>
+        <dt>Electron</dt><dd>${escHtmlAbout(info.electron_version)}</dd>
+        <dt>Node</dt><dd>${escHtmlAbout(info.node_version)}</dd>
+      </dl>
     </div>
 
     ${coreBlock ? `<div class="card">${coreBlock}</div>` : ''}
