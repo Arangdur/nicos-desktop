@@ -219,6 +219,18 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_json(403, {"ok": False, "error": "solo disponible localmente"})
                     return
                 self._send_json(200, {"ok": True, "devices": pairing.list_devices()})
+            elif path == "/api/v1/users":
+                # Director-only, para "Personas con acceso a NicOS" -- combina
+                # identidades ya vinculadas con códigos generados que todavía
+                # nadie usó (ver pairing.list_users/list_pending_codes).
+                if self._is_lan():
+                    self._send_json(403, {"ok": False, "error": "solo disponible localmente"})
+                    return
+                self._send_json(200, {
+                    "ok": True,
+                    "users": pairing.list_users(),
+                    "pending": pairing.list_pending_codes(),
+                })
             else:
                 self._send_json(404, {"ok": False, "error": "ruta no encontrada"})
         except sheets_client.SheetsConfigError as e:
@@ -277,16 +289,61 @@ class Handler(BaseHTTPRequestHandler):
                 if self._is_lan():
                     self._send_json(403, {"ok": False, "error": "el pairing se inicia desde la Mac"})
                     return
-                self._send_json(200, {"ok": True, **pairing.start_pairing()})
+                role = body.get("role", "operativa")
+                turno = body.get("turno") or None
+                display_name = body.get("display_name") or None
+                try:
+                    result = pairing.start_pairing(role, turno=turno, created_by="nicolas", display_name=display_name)
+                    self._send_json(200, {"ok": True, **result})
+                except pairing.PairingError as e:
+                    self._send_json(400, {"ok": False, "error": str(e)})
 
             elif path == "/api/v1/pairing/complete":
                 code = body.get("code", "")
                 device_name = body.get("device_name", "Dispositivo sin nombre")
                 try:
-                    result = pairing.complete_pairing(code, device_name)
+                    result = pairing.complete_pairing(
+                        code, device_name,
+                        display_name=body.get("display_name", ""),
+                        dni=body.get("dni", ""),
+                        fecha_nacimiento=body.get("fecha_nacimiento", ""),
+                        sexo=body.get("sexo", ""),
+                        pin=body.get("pin", ""),
+                    )
                     self._send_json(200, {"ok": True, **result})
                 except pairing.PairingError as e:
                     self._send_json(400, {"ok": False, "error": str(e)})
+
+            elif path.startswith("/api/v1/pairing/") and path.endswith("/cancel"):
+                if self._is_lan():
+                    self._send_json(403, {"ok": False, "error": "solo disponible localmente"})
+                    return
+                code = path.split("/")[4]
+                pairing.cancel_pairing_code(code)
+                self._send_json(200, {"ok": True})
+
+            elif path == "/api/v1/pin/verify":
+                # Selector local "¿Quién sos?" en un dispositivo ya autorizado --
+                # requiere el token de dispositivo igual que cualquier ruta de
+                # Operativa/Enfermero (no es una ruta nueva sin autenticación).
+                auth = self._authenticate()
+                if auth is None:
+                    self._send_json(401, {"ok": False, "error": "token inválido o ausente"})
+                    return
+                pin = body.get("pin", "")
+                ok = pairing.verify_pin_for_device(auth["device_id"], pin)
+                if not ok:
+                    self._send_json(401, {"ok": False, "error": "PIN incorrecto"})
+                    return
+                self._send_json(200, {"ok": True})
+
+            elif path.startswith("/api/v1/users/") and path.endswith("/revoke"):
+                if self._is_lan():
+                    self._send_json(403, {"ok": False, "error": "solo disponible localmente"})
+                    return
+                user_id = path.split("/")[4]
+                pairing.revoke_user(user_id)
+                self._send_json(200, {"ok": True})
 
             elif path == "/api/v1/tasks":
                 auth = self._authenticate()

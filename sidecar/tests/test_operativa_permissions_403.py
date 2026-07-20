@@ -47,8 +47,11 @@ class TestOperativaPermissions403(unittest.TestCase):
         # Dispositivo real, pareado de verdad -- no un token inventado. Si
         # esto no bastara para pasar las rutas Director-only, confirmaría que
         # el bloqueo es por rol, no por autenticación fallida.
+        code = pairing.start_pairing("operativa", created_by="nicolas", display_name="Persona de prueba")["code"]
         cls.pairing_result = pairing.complete_pairing(
-            pairing.start_pairing()["code"], "PC de prueba"
+            code, "PC de prueba",
+            display_name="Persona de Prueba", dni="30111222",
+            fecha_nacimiento="1990-01-01", sexo="NC", pin="1234",
         )
         cls.token = cls.pairing_result["token"]
 
