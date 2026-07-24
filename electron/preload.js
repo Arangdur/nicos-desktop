@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('nicos', {
   operativaFlushOutbox: () => ipcRenderer.invoke('nicos:operativa-flush-outbox'),
   operativaOutboxCount: () => ipcRenderer.invoke('nicos:operativa-outbox-count'),
   operativaListMessages: () => ipcRenderer.invoke('nicos:operativa-list-messages'),
+  recordatoriosList: () => ipcRenderer.invoke('nicos:recordatorios-list'),
   operativaUpdateMessage: (row, updates) => ipcRenderer.invoke('nicos:operativa-update-message', { row, updates }),
 
   abateListResidentes: () => ipcRenderer.invoke('nicos:abate-list-residentes'),

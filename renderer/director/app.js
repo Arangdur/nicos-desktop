@@ -35,6 +35,7 @@ document.querySelectorAll('[data-tab]').forEach((btn) => {
     switchTab(btn.dataset.tab);
     if (btn.dataset.tab === 'tareas') renderTasksList();
     if (btn.dataset.tab === 'abate') loadAbateTab();
+    if (btn.dataset.tab === 'recordatorios') loadRecordatoriosTab();
     if (btn.dataset.tab === 'ajustes') loadAjustes();
     if (btn.dataset.tab === 'acerca-de') loadAcercaDe();
   });
@@ -201,6 +202,7 @@ async function init() {
 
   initTasksTab(API);
   initAbateTab(API);
+  initRecordatoriosTab(API);
   await loadResumen();
   await loadTasksTab();
   loadChat();

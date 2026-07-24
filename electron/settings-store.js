@@ -27,8 +27,14 @@ const DIRECTOR_SECRET_KEYS = [
   'ANTHROPIC_API_KEY',
   'OPENAI_API_KEY',
   'GOOGLE_SERVICE_ACCOUNT_JSON',
+  'TWILIO_AUTH_TOKEN',
+  'DRAPP_API_KEY',
 ];
-const DIRECTOR_PLAIN_KEYS = ['WHATSAPP_SHEET_ID', 'ANTHROPIC_MODEL', 'OPENAI_MODEL', 'TAILSCALE_IP'];
+const DIRECTOR_PLAIN_KEYS = [
+  'WHATSAPP_SHEET_ID', 'ANTHROPIC_MODEL', 'OPENAI_MODEL', 'TAILSCALE_IP',
+  'TWILIO_ACCOUNT_SID', 'TWILIO_WHATSAPP_FROM',
+  'DRAPP_TEAM_ID',
+];
 
 // IDENTITIES_JSON contiene los tokens de TODAS las personas vinculadas a esta
 // PC -- por eso se cifra igual que las API keys, aunque conceptualmente sea

@@ -42,6 +42,35 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
       <textarea id="google-creds" rows="6" placeholder='{"type": "service_account", ...}'></textarea>
     </div>
 
+    <div class="card">
+      <h3>WhatsApp — Twilio (recordatorio de turnos)</h3>
+      <p class="help-text">
+        Se usa para mandar el recordatorio de turnos de Medicina General ~24hs antes
+        (Psiquiatría ya tiene su propio recordatorio en DrApp). Los datos están en tu
+        cuenta de Twilio, sección Account Info.
+      </p>
+      <label>Account SID</label>
+      <input type="text" id="twilio-sid" value="${current.TWILIO_ACCOUNT_SID || ''}" placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+      <label>Auth Token ${current.TWILIO_AUTH_TOKEN_configurado ? '— ya configurado ✓' : '— falta configurar'}</label>
+      <input type="password" id="twilio-token" placeholder="••••••••••••••••">
+      <label>Número de WhatsApp de Twilio (con whatsapp:+, se agrega solo)</label>
+      <input type="text" id="twilio-from" value="${current.TWILIO_WHATSAPP_FROM || ''}" placeholder="+14155238886">
+    </div>
+
+    <div class="card">
+      <h3>DrApp — Agenda real del consultorio</h3>
+      <p class="help-text">
+        Para que NicOS lea y gestione turnos reales (disponibilidad, alta, cancelación).
+        La API key se genera en developers.drapp.com.ar (registrando una app) o en el
+        backoffice de DrApp. El Team ID es el código que figura arriba a la derecha en
+        DrApp Web, o en "Mi cuenta" de la app.
+      </p>
+      <label>API key ${current.DRAPP_API_KEY_configurado ? '— ya configurada ✓' : '— falta configurar'}</label>
+      <input type="password" id="drapp-key" placeholder="drapp_sandbox_... o drapp_live_...">
+      <label>Team ID</label>
+      <input type="text" id="drapp-team" value="${current.DRAPP_TEAM_ID || ''}" placeholder="clinica-norte">
+    </div>
+
     <div class="row" style="margin-bottom:var(--space-4);">
       <button class="primary" id="btn-save-settings">Guardar</button>
       <span id="settings-status" style="font-size:var(--text-sm);"></span>
@@ -93,13 +122,20 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
       OPENAI_MODEL: containerEl.querySelector('#openai-model').value.trim(),
       WHATSAPP_SHEET_ID: containerEl.querySelector('#sheet-id').value.trim(),
       TAILSCALE_IP: containerEl.querySelector('#tailscale-ip').value.trim(),
+      TWILIO_ACCOUNT_SID: containerEl.querySelector('#twilio-sid').value.trim(),
+      TWILIO_WHATSAPP_FROM: containerEl.querySelector('#twilio-from').value.trim(),
+      DRAPP_TEAM_ID: containerEl.querySelector('#drapp-team').value.trim(),
     };
     const anthropicKey = containerEl.querySelector('#anthropic-key').value.trim();
     const openaiKey = containerEl.querySelector('#openai-key').value.trim();
     const googleCreds = containerEl.querySelector('#google-creds').value.trim();
+    const twilioToken = containerEl.querySelector('#twilio-token').value.trim();
+    const drappKey = containerEl.querySelector('#drapp-key').value.trim();
     if (anthropicKey) update.ANTHROPIC_API_KEY = anthropicKey;
     if (openaiKey) update.OPENAI_API_KEY = openaiKey;
     if (googleCreds) update.GOOGLE_SERVICE_ACCOUNT_JSON = googleCreds;
+    if (drappKey) update.DRAPP_API_KEY = drappKey;
+    if (twilioToken) update.TWILIO_AUTH_TOKEN = twilioToken;
 
     try {
       const result = await window.nicos.saveSettings(update);

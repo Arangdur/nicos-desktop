@@ -17,6 +17,7 @@ con un mensaje genérico.
 """
 import datetime
 import json
+import os
 import sys
 import time
 import traceback
@@ -25,10 +26,28 @@ import uuid
 import ai_router
 import centro_mando_adapter
 import db
+import drapp_client
+import recordatorios
 import tasks
+import twilio_client
 
 POLL_INTERVAL_SECONDS = 1
 QUEUED_STATES = ("received", "parsing", "ready")
+
+# Cada cuánto se revisa si hay recordatorios de turno para mandar -- no hace
+# falta que sea cada segundo como el resto del loop, ver
+# recordatorios.turnos_para_enviar_ahora() para la banda de 23-25hs que
+# tolera que el chequeo no caiga exacto.
+RECORDATORIOS_CHECK_INTERVAL_SECONDS = 300
+_ultimo_chequeo_recordatorios = None
+
+# Sincronización automática de turnos desde la API de DrApp -- opt-in: si
+# DRAPP_API_KEY no está configurado, esta función es un no-op y el
+# formulario manual del Director sigue siendo el único camino (ver
+# recordatorios_tab.js). No hace falta que corra seguido -- los turnos de
+# mañana no cambian cada minuto.
+DRAPP_SYNC_INTERVAL_SECONDS = 600
+_ultimo_sync_drapp = None
 
 # v0.2.1-rc6: respaldo estructural ADEMÁS del arreglo de la máquina de estados
 # (ver tasks.py) -- ninguna tarea puede pasar por _process_classification()
@@ -398,10 +417,85 @@ def _process_execution(task):
             pass
 
 
+def _procesar_recordatorios_si_corresponde():
+    """Se llama en cada vuelta del loop pero es un no-op salvo que hayan
+    pasado RECORDATORIOS_CHECK_INTERVAL_SECONDS desde el último chequeo --
+    así el loop principal de tareas (que corre cada 1s) no se ve afectado."""
+    global _ultimo_chequeo_recordatorios
+    # Hora LOCAL, no UTC -- los turnos están cargados en hora argentina y la
+    # ventana de envío se calcula contra este valor (auditoría 23/07).
+    ahora = datetime.datetime.now()
+    if _ultimo_chequeo_recordatorios is not None:
+        transcurrido = (ahora - _ultimo_chequeo_recordatorios).total_seconds()
+        if transcurrido < RECORDATORIOS_CHECK_INTERVAL_SECONDS:
+            return
+    _ultimo_chequeo_recordatorios = ahora
+
+    for r in recordatorios.turnos_para_enviar_ahora(ahora):
+        mensaje = recordatorios.mensaje_recordatorio(r)
+        try:
+            twilio_client.enviar_whatsapp(r["telefono"], mensaje)
+            recordatorios.marcar_resultado(r["id"], "enviado")
+        except (twilio_client.TwilioConfigError, twilio_client.TwilioSendError) as e:
+            sys.stderr.write(f"[worker] ERROR enviando recordatorio {r['id']}: {e}\n")
+            recordatorios.marcar_resultado(r["id"], "fallo_envio")
+
+
+def _sincronizar_drapp_si_corresponde():
+    """No-op si DRAPP_API_KEY no está configurado -- así el Director puede
+    seguir usando el formulario manual sin que esto cambie nada hasta que
+    él mismo cargue la clave en Ajustes."""
+    global _ultimo_sync_drapp
+    if not os.getenv("DRAPP_API_KEY"):
+        return
+    # Hora local también acá -- las fechas desde/hasta que se le piden a
+    # DrApp son días calendario argentinos, no UTC (que cambia de día 3hs
+    # antes y podría saltearse los turnos de la mañana siguiente).
+    ahora = datetime.datetime.now()
+    if _ultimo_sync_drapp is not None:
+        transcurrido = (ahora - _ultimo_sync_drapp).total_seconds()
+        if transcurrido < DRAPP_SYNC_INTERVAL_SECONDS:
+            return
+    _ultimo_sync_drapp = ahora
+
+    desde = ahora.date().isoformat()
+    hasta = (ahora + datetime.timedelta(days=2)).date().isoformat()
+    try:
+        eventos = drapp_client.list_turnos_medicina_general(desde, hasta)
+    except (drapp_client.DrAppConfigError, drapp_client.DrAppAPIError) as e:
+        sys.stderr.write(f"[worker] ERROR sincronizando con DrApp: {e}\n")
+        return
+
+    turnos = []
+    for evento in eventos:
+        consumer = evento.get("consumer") or {}
+        consumer_id = consumer.get("id")
+        nombre = f"{consumer.get('lastName', '')}, {consumer.get('firstName', '')}".strip(", ")
+        telefono = None
+        if consumer_id:
+            try:
+                telefono = drapp_client.get_telefono_paciente(consumer_id)
+            except drapp_client.DrAppAPIError as e:
+                sys.stderr.write(f"[worker] ERROR consultando teléfono de {consumer_id}: {e}\n")
+        turnos.append({
+            "drapp_event_id": evento.get("id"),
+            "paciente_nombre": nombre or "(sin nombre en DrApp)",
+            "telefono": telefono,
+            "fecha_turno": evento.get("day"),
+            "hora_turno": evento.get("time"),
+            "cobertura": "",
+            "practica": (evento.get("service") or {}).get("label", ""),
+        })
+    if turnos:
+        recordatorios.sincronizar_desde_drapp(turnos, sincronizado_by="drapp-sync")
+
+
 def run_forever():
     recover_orphaned_tasks()
     sys.stderr.write("[worker] loop arrancado\n")
     while True:
+        _procesar_recordatorios_si_corresponde()
+        _sincronizar_drapp_si_corresponde()
         task = _claim_next_task()
         if task is None:
             time.sleep(POLL_INTERVAL_SECONDS)

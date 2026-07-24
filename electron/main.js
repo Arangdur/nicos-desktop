@@ -32,6 +32,11 @@ function _envFromConfig(config) {
   if (config.ANTHROPIC_MODEL) env.ANTHROPIC_MODEL = config.ANTHROPIC_MODEL;
   if (config.OPENAI_MODEL) env.OPENAI_MODEL = config.OPENAI_MODEL;
   if (config.TAILSCALE_IP) env.NICOS_TAILSCALE_IP = config.TAILSCALE_IP;
+  if (config.TWILIO_ACCOUNT_SID) env.TWILIO_ACCOUNT_SID = config.TWILIO_ACCOUNT_SID;
+  if (config.TWILIO_AUTH_TOKEN) env.TWILIO_AUTH_TOKEN = config.TWILIO_AUTH_TOKEN;
+  if (config.TWILIO_WHATSAPP_FROM) env.TWILIO_WHATSAPP_FROM = config.TWILIO_WHATSAPP_FROM;
+  if (config.DRAPP_API_KEY) env.DRAPP_API_KEY = config.DRAPP_API_KEY;
+  if (config.DRAPP_TEAM_ID) env.DRAPP_TEAM_ID = config.DRAPP_TEAM_ID;
   return env;
 }
 
@@ -260,6 +265,7 @@ ipcMain.handle('nicos:operativa-list-tasks', () => operativaClient.listTasks());
 ipcMain.handle('nicos:operativa-flush-outbox', () => operativaClient.flushOutbox());
 ipcMain.handle('nicos:operativa-outbox-count', () => operativaClient.getOutboxCount());
 ipcMain.handle('nicos:operativa-list-messages', () => operativaClient.listMessages());
+ipcMain.handle('nicos:recordatorios-list', () => operativaClient.listRecordatorios());
 ipcMain.handle('nicos:operativa-update-message', (_event, { row, updates }) =>
   operativaClient.updateMessage(row, updates));
 

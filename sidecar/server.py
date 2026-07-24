@@ -38,6 +38,7 @@ import centro_mando_adapter
 import clinical_guard
 import db
 import pairing
+import recordatorios
 import sheets_client
 import tasks
 import worker
@@ -280,10 +281,25 @@ class Handler(BaseHTTPRequestHandler):
                     categoria=qs.get("categoria", [None])[0],
                 )
                 self._send_json(200, {"ok": True, "novedades": novedades})
+            elif path == "/api/v1/recordatorios":
+                # Director + Operativa (Marianela necesita ver qué falta
+                # resolver a mano -- sin_telefono, turnos liberados) --
+                # Enfermero queda afuera, no tiene nada que ver acá.
+                auth = self._require_role(self._authenticate(), {"director", "operativa"})
+                if auth is None:
+                    return
+                qs = {}
+                if parsed.query:
+                    from urllib.parse import parse_qs
+                    qs = parse_qs(parsed.query)
+                estado = qs.get("estado", [None])[0]
+                self._send_json(200, {"ok": True, "recordatorios": recordatorios.list_recordatorios(estado)})
             else:
                 self._send_json(404, {"ok": False, "error": "ruta no encontrada"})
         except sheets_client.SheetsConfigError as e:
             self._send_json(200, {"ok": False, "error": str(e)})
+        except recordatorios.RecordatorioError as e:
+            self._send_json(400, {"ok": False, "error": str(e)})
         except Exception as e:
             sys.stderr.write("[sidecar] ERROR: " + traceback.format_exc() + "\n")
             self._send_json(500, {"ok": False, "error": str(e)})
@@ -500,6 +516,16 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 self._send_json(200, {"ok": True, **result})
 
+            elif path == "/api/v1/recordatorios/importar":
+                # Director-only, bloqueado a nivel de servidor igual que el
+                # resto de las rutas admin -- la carga de turnos es manual
+                # por ahora (ver recordatorios.py), no accesible desde la LAN.
+                if self._is_lan():
+                    self._send_json(403, {"ok": False, "error": "solo disponible localmente"})
+                    return
+                result = recordatorios.importar_turnos(body.get("turnos", []), created_by="nicolas")
+                self._send_json(200, {"ok": True, **result})
+
             else:
                 self._send_json(404, {"ok": False, "error": "ruta no encontrada"})
         except sheets_client.SheetsConfigError as e:
@@ -507,6 +533,8 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._send_json(400, {"ok": False, "error": "body no es JSON válido"})
         except abate_enfermeria.AbateError as e:
+            self._send_json(400, {"ok": False, "error": str(e)})
+        except recordatorios.RecordatorioError as e:
             self._send_json(400, {"ok": False, "error": str(e)})
         except Exception as e:
             sys.stderr.write("[sidecar] ERROR: " + traceback.format_exc() + "\n")

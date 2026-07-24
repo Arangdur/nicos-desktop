@@ -217,6 +217,12 @@ async function updateMessage(row, updates) {
   });
 }
 
+// ---- Recordatorios de turno (Director + Operativa leen, solo Director carga) --
+
+async function listRecordatorios() {
+  return _authedFetch('/api/v1/recordatorios');
+}
+
 function getOutboxCount() {
   return _readOutbox().length;
 }
@@ -259,4 +265,5 @@ module.exports = {
   submitTask, flushOutbox, listTasks, getOutboxCount, listMessages, updateMessage,
   abateListResidentes, abateGetTratamiento, abateListAdministracionesHoy,
   abateRegistrarAdministracion, abateListNovedades, abateCreateNovedad,
+  listRecordatorios,
 };
