@@ -366,6 +366,175 @@ def extract(raw_text: str, provider: str = None) -> dict:
     return {"outcome": "both_failed", "error": combined_error, "attempts": attempts}
 
 
+# v0.2.5 -- clasificación + borrador de respuesta para mensajes de WhatsApp
+# ENTRANTES (primera vez que NicOS recibe algo, no solo manda). Mismo patrón
+# de resiliencia que `extract()` -- presupuesto duro de 2 llamadas, nunca
+# enmascara un proveedor mal configurado probando el otro. La diferencia de
+# fondo con `extract()`: acá el texto lo escribe un PACIENTE, no Nicolás ni
+# Marianela, así que el prompt es mucho más restrictivo sobre qué puede
+# afirmar el borrador -- nunca inventa un horario disponible (no hay lookup
+# real de disponibilidad en esta versión, DrApp todavía no tiene la API
+# habilitada para el equipo) y nunca contesta nada clínico -- solo redacta,
+# nunca envía (eso lo decide una persona en la Bandeja de WhatsApp).
+
+MENSAJE_WHATSAPP_SYSTEM_PROMPT = """Sos el asistente que arma BORRADORES de respuesta para los \
+mensajes de WhatsApp que le escriben pacientes al consultorio del Dr. Nicolás Buso. Nunca mandás \
+nada vos -- una persona del consultorio revisa y aprueba cada borrador antes de que salga.
+
+Clasificá el mensaje en una de estas categorías:
+- turno_nuevo: pide sacar un turno.
+- cancelacion: pide cancelar un turno que ya tiene.
+- reprogramacion: pide cambiar la fecha/hora de un turno.
+- consulta_general: pregunta administrativa (horarios de atención, dirección, obra social, precio).
+- receta: pide una receta, renovación de medicación, o cualquier cosa clínica (síntomas, dudas \
+sobre un tratamiento, interpretación de un estudio).
+- ambiguo: no se entiende qué pide, o pide varias cosas a la vez.
+
+`requiere_profesional`: true SIEMPRE que la clasificación sea "receta", o si el texto menciona \
+síntomas, medicación, diagnóstico o cualquier cosa clínica aunque la clasificación principal sea \
+otra. false para todo lo puramente administrativo (turnos, cancelaciones, consultas generales).
+
+`urgente`: true si el texto sugiere una situación que no puede esperar la respuesta habitual \
+(dolor agudo, crisis, palabras como "urgente" o "emergencia"). Esto NO dispara ninguna acción \
+sola -- solo hace que la persona que revisa lo vea primero.
+
+Reglas del borrador (`borrador_respuesta`), no negociables:
+1. NUNCA inventes ni ofrezcas un horario específico disponible -- no tenés acceso a la agenda real. \
+Si es turno_nuevo/reprogramacion, el borrador dice que alguien del consultorio va a confirmar el \
+horario, nunca propone uno.
+2. NUNCA respondas nada clínico (no interpretes síntomas, no confirmes ni sugieras medicación). Si \
+`requiere_profesional` es true, el borrador solo avisa que el Dr. Buso va a revisar el pedido \
+personalmente -- no intenta resolver el contenido médico.
+3. Tono cordial, breve (2-4 líneas), en español rioplatense, firmado como "Consultorio Dr. Nicolás \
+Buso" -- mismo estilo que ya usa el sistema de recordatorios.
+4. Si es ambiguo, el borrador pide que aclare qué necesita, sin asumir nada."""
+
+MENSAJE_WHATSAPP_JSON_SCHEMA = {
+    "name": "clasificacion_mensaje_whatsapp",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "clasificacion": {
+                "type": "string",
+                "enum": ["turno_nuevo", "cancelacion", "reprogramacion", "consulta_general", "receta", "ambiguo"],
+            },
+            "requiere_profesional": {"type": "boolean"},
+            "urgente": {"type": "boolean"},
+            "borrador_respuesta": {"type": "string"},
+        },
+        "required": ["clasificacion", "requiere_profesional", "urgente", "borrador_respuesta"],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
+_REQUIRED_MENSAJE_KEYS = set(MENSAJE_WHATSAPP_JSON_SCHEMA["schema"]["required"])
+_VALID_CLASIFICACIONES = set(MENSAJE_WHATSAPP_JSON_SCHEMA["schema"]["properties"]["clasificacion"]["enum"])
+
+
+def _validate_mensaje_shape(data):
+    if not isinstance(data, dict):
+        return f"la respuesta no es un objeto JSON (vino {type(data).__name__})"
+    missing = _REQUIRED_MENSAJE_KEYS - set(data.keys())
+    if missing:
+        return f"faltan campos requeridos: {', '.join(sorted(missing))}"
+    if data.get("clasificacion") not in _VALID_CLASIFICACIONES:
+        return f"'clasificacion' fuera del rango esperado: {data.get('clasificacion')!r}"
+    if not isinstance(data.get("requiere_profesional"), bool):
+        return "'requiere_profesional' no es booleano"
+    if not isinstance(data.get("urgente"), bool):
+        return "'urgente' no es booleano"
+    if not isinstance(data.get("borrador_respuesta"), str) or not data["borrador_respuesta"].strip():
+        return "'borrador_respuesta' vacío o no es texto"
+    return None
+
+
+def _try_clasificar_mensaje(provider_name: str, texto: str) -> dict:
+    if provider_name == "openai":
+        client = _get_openai_client()
+        if client is None:
+            return {"status": "auth_error", "provider": "openai", "error": _openai_error}
+        try:
+            resp = client.chat.completions.create(
+                model=os.getenv("OPENAI_MODEL", "gpt-5"),
+                messages=[
+                    {"role": "system", "content": MENSAJE_WHATSAPP_SYSTEM_PROMPT},
+                    {"role": "user", "content": texto},
+                ],
+                response_format={"type": "json_schema", "json_schema": MENSAJE_WHATSAPP_JSON_SCHEMA},
+            )
+            raw_content = resp.choices[0].message.content
+            try:
+                data = json.loads(raw_content)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"status": "malformed", "provider": "openai", "error": f"JSON inválido: {e}"}
+        except Exception as e:
+            status = "auth_error" if _classify_exception(e) == "auth" else "transient_error"
+            return {"status": status, "provider": "openai", "error": f"{type(e).__name__}: {e}"}
+    else:
+        client = _get_claude_client()
+        if client is None:
+            return {"status": "auth_error", "provider": "claude", "error": _claude_error}
+        try:
+            resp = client.messages.create(
+                model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5"),
+                max_tokens=500,
+                system=MENSAJE_WHATSAPP_SYSTEM_PROMPT,
+                tools=[{
+                    "name": "clasificacion_mensaje_whatsapp",
+                    "description": "Clasificación y borrador de respuesta para un mensaje entrante de WhatsApp.",
+                    "input_schema": MENSAJE_WHATSAPP_JSON_SCHEMA["schema"],
+                }],
+                tool_choice={"type": "tool", "name": "clasificacion_mensaje_whatsapp"},
+                messages=[{"role": "user", "content": texto}],
+            )
+            tool_block = next((b for b in resp.content if b.type == "tool_use"), None)
+            if tool_block is None:
+                return {"status": "malformed", "provider": "claude", "error": "la respuesta no incluyó el tool_use esperado"}
+            data = tool_block.input
+        except Exception as e:
+            status = "auth_error" if _classify_exception(e) == "auth" else "transient_error"
+            return {"status": status, "provider": "claude", "error": f"{type(e).__name__}: {e}"}
+
+    shape_error = _validate_mensaje_shape(data)
+    if shape_error:
+        return {"status": "malformed", "provider": provider_name, "error": shape_error}
+    return {"status": "success", "provider": provider_name, "data": data}
+
+
+def clasificar_y_redactar_mensaje(texto: str, provider: str = None) -> dict:
+    """Mismo contrato de salida que `extract()` -- 'outcome': 'success' |
+    'auth_error' | 'both_failed'. `data` trae clasificacion/requiere_profesional/
+    urgente/borrador_respuesta. Presupuesto duro: 2 llamadas HTTP reales."""
+    provider = provider or get_provider_for("clasificar_mensaje_whatsapp", default="claude")
+    alternate = "claude" if provider == "openai" else "openai"
+
+    attempts = []
+    first = _try_clasificar_mensaje(provider, texto)
+    attempts.append(first)
+
+    if first["status"] == "success":
+        return {"outcome": "success", "data": first["data"], "provider": provider, "attempts": attempts}
+
+    if first["status"] == "auth_error":
+        return {"outcome": "auth_error", "provider": provider, "error": first["error"], "attempts": attempts}
+
+    if not get_provider_matrix().get("fallback_on_primary_failure", True):
+        return {"outcome": "both_failed", "error": first["error"], "attempts": attempts}
+
+    second = _try_clasificar_mensaje(alternate, texto)
+    attempts.append(second)
+
+    if second["status"] == "success":
+        return {
+            "outcome": "success", "data": second["data"], "provider": alternate,
+            "fell_back_from": provider, "attempts": attempts,
+        }
+
+    combined_error = f"{provider}: {first['error']} | {alternate}: {second['error']}"
+    return {"outcome": "both_failed", "error": combined_error, "attempts": attempts}
+
+
 def review(candidate_text: str, context: dict, provider: str = None) -> dict:
     """Un segundo proveedor revisa una salida antes de mostrarla — usado para
     control cruzado en tareas donde conviene una segunda mirada (ej. redacción

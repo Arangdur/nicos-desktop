@@ -30,6 +30,10 @@ contextBridge.exposeInMainWorld('nicos', {
   operativaListMessages: () => ipcRenderer.invoke('nicos:operativa-list-messages'),
   recordatoriosList: () => ipcRenderer.invoke('nicos:recordatorios-list'),
   operativaUpdateMessage: (row, updates) => ipcRenderer.invoke('nicos:operativa-update-message', { row, updates }),
+  whatsappMensajesList: () => ipcRenderer.invoke('nicos:whatsapp-mensajes-list'),
+  whatsappMensajeAprobar: (mensajeId, textoFinal) =>
+    ipcRenderer.invoke('nicos:whatsapp-mensaje-aprobar', { mensajeId, textoFinal }),
+  whatsappMensajeRechazar: (mensajeId) => ipcRenderer.invoke('nicos:whatsapp-mensaje-rechazar', mensajeId),
 
   abateListResidentes: () => ipcRenderer.invoke('nicos:abate-list-residentes'),
   abateGetTratamiento: (residenteId) => ipcRenderer.invoke('nicos:abate-get-tratamiento', residenteId),

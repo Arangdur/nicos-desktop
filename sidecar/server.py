@@ -37,14 +37,24 @@ import ai_router
 import centro_mando_adapter
 import clinical_guard
 import db
+import mensajes_whatsapp
 import pairing
 import recordatorios
 import sheets_client
 import tasks
+import twilio_client
+import whatsapp_inbound
 import worker
 
 LAN_PORT = int(os.getenv("NICOS_LAN_PORT", "47500"))
 TAILSCALE_IP = os.getenv("NICOS_TAILSCALE_IP", "").strip()
+
+# v0.2.5 -- URL pública exacta que Twilio va a usar para el webhook de WhatsApp
+# entrante (el dominio *.ts.net que da Tailscale Funnel, NUNCA la IP cruda --
+# ver whatsapp_inbound.verificar_firma, que exige la URL EXACTA carácter a
+# carácter). Configurable desde Ajustes, se setea recién cuando el Funnel
+# está activo -- mientras esté vacía, /whatsapp/inbound rechaza todo.
+TWILIO_WEBHOOK_BASE_URL = os.getenv("NICOS_TWILIO_WEBHOOK_BASE_URL", "").strip().rstrip("/")
 
 # Rollback real (v0.2.1): apaga el flujo de tareas/aprobación sin tocar código
 # ni perder lo demás -- /director/summary y /director/chat (lo que ya andaba
@@ -125,6 +135,12 @@ class Handler(BaseHTTPRequestHandler):
             return {}
         raw = self.rfile.read(length)
         return json.loads(raw.decode("utf-8"))
+
+    def _read_raw_body(self) -> bytes:
+        length = int(self.headers.get("Content-Length", 0))
+        if length == 0:
+            return b""
+        return self.rfile.read(length)
 
     def _is_lan(self):
         return getattr(self.server, "is_lan", False)
@@ -294,11 +310,26 @@ class Handler(BaseHTTPRequestHandler):
                     qs = parse_qs(parsed.query)
                 estado = qs.get("estado", [None])[0]
                 self._send_json(200, {"ok": True, "recordatorios": recordatorios.list_recordatorios(estado)})
+            elif path == "/api/v1/whatsapp/mensajes":
+                # Director + Operativa -- misma lógica que recordatorios: Marianela
+                # necesita ver y poder resolver los borradores no-clínicos, el
+                # Director ve todo incluido lo que requiere_profesional.
+                auth = self._require_role(self._authenticate(), {"director", "operativa"})
+                if auth is None:
+                    return
+                qs = {}
+                if parsed.query:
+                    from urllib.parse import parse_qs
+                    qs = parse_qs(parsed.query)
+                estado = qs.get("estado", [None])[0]
+                self._send_json(200, {"ok": True, "mensajes": mensajes_whatsapp.list_mensajes(estado)})
             else:
                 self._send_json(404, {"ok": False, "error": "ruta no encontrada"})
         except sheets_client.SheetsConfigError as e:
             self._send_json(200, {"ok": False, "error": str(e)})
         except recordatorios.RecordatorioError as e:
+            self._send_json(400, {"ok": False, "error": str(e)})
+        except mensajes_whatsapp.MensajeWhatsappError as e:
             self._send_json(400, {"ok": False, "error": str(e)})
         except Exception as e:
             sys.stderr.write("[sidecar] ERROR: " + traceback.format_exc() + "\n")
@@ -307,6 +338,16 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+
+        # /whatsapp/inbound se maneja ANTES de leer el body como JSON -- Twilio
+        # manda application/x-www-form-urlencoded, no JSON, y esta es la ÚNICA
+        # ruta de todo el sidecar que puede recibir tráfico real de internet
+        # (vía Tailscale Funnel) -- por eso NO usa is_lan() ni Bearer token,
+        # usa la firma de Twilio como límite de seguridad (ver whatsapp_inbound.py).
+        if path == "/whatsapp/inbound":
+            self._handle_whatsapp_inbound()
+            return
+
         try:
             body = self._read_json_body()
 
@@ -526,6 +567,26 @@ class Handler(BaseHTTPRequestHandler):
                 result = recordatorios.importar_turnos(body.get("turnos", []), created_by="nicolas")
                 self._send_json(200, {"ok": True, **result})
 
+            elif path.startswith("/api/v1/whatsapp/mensajes/") and path.endswith("/aprobar"):
+                auth = self._require_role(self._authenticate(), {"director", "operativa"})
+                if auth is None:
+                    return
+                mensaje_id = path.split("/")[5]
+                texto_final = body.get("texto_final") or None
+                try:
+                    result = mensajes_whatsapp.aprobar_y_enviar(mensaje_id, auth["user_id"], auth["role"], texto_final)
+                    self._send_json(200, result)
+                except mensajes_whatsapp.RequiereProfesional as e:
+                    self._send_json(403, {"ok": False, "error": str(e)})
+
+            elif path.startswith("/api/v1/whatsapp/mensajes/") and path.endswith("/rechazar"):
+                auth = self._require_role(self._authenticate(), {"director", "operativa"})
+                if auth is None:
+                    return
+                mensaje_id = path.split("/")[5]
+                result = mensajes_whatsapp.rechazar(mensaje_id, auth["user_id"])
+                self._send_json(200, result)
+
             else:
                 self._send_json(404, {"ok": False, "error": "ruta no encontrada"})
         except sheets_client.SheetsConfigError as e:
@@ -536,6 +597,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"ok": False, "error": str(e)})
         except recordatorios.RecordatorioError as e:
             self._send_json(400, {"ok": False, "error": str(e)})
+        except mensajes_whatsapp.MensajeWhatsappError as e:
+            self._send_json(400, {"ok": False, "error": str(e)})
+        except (twilio_client.TwilioConfigError, twilio_client.TwilioSendError) as e:
+            self._send_json(502, {"ok": False, "error": str(e)})
         except Exception as e:
             sys.stderr.write("[sidecar] ERROR: " + traceback.format_exc() + "\n")
             self._send_json(500, {"ok": False, "error": str(e)})
@@ -607,6 +672,59 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"ok": False, "error": str(e)})
         except ValueError as e:
             self._send_json(404, {"ok": False, "error": str(e)})
+
+    def _send_empty_twiml(self, status=200):
+        # Twilio espera TwiML (o nada) como respuesta a un webhook entrante --
+        # una <Response/> vacía significa "recibido, no hay respuesta
+        # automática inmediata" (la respuesta real sale después, aprobada a
+        # mano, por una llamada aparte a la API REST de Twilio -- ver
+        # twilio_client.enviar_whatsapp). Nunca devolver JSON acá, Twilio no
+        # lo espera en esta ruta.
+        body = b'<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
+        self.send_response(status)
+        self.send_header("Content-Type", "text/xml; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _handle_whatsapp_inbound(self):
+        """La única ruta de todo el sidecar pensada para tráfico público real
+        (vía Tailscale Funnel) -- sin is_lan(), sin Bearer token. El único
+        límite de seguridad es la firma de Twilio, verificada carácter a
+        carácter contra NICOS_TWILIO_WEBHOOK_BASE_URL (ver comentario en la
+        constante). Cualquier fallo de verificación es un 403 silencioso --
+        nunca se distingue en la respuesta si falló la firma o falta config,
+        para no darle información útil a quien esté probando pegarle a esta
+        URL sin ser Twilio de verdad."""
+        try:
+            raw = self._read_raw_body()
+            form_params = whatsapp_inbound.parsear_form_body(raw)
+            signature = self.headers.get("X-Twilio-Signature", "")
+            auth_token = os.getenv("TWILIO_AUTH_TOKEN", "")
+
+            if not TWILIO_WEBHOOK_BASE_URL or not auth_token:
+                sys.stderr.write("[sidecar] /whatsapp/inbound: falta NICOS_TWILIO_WEBHOOK_BASE_URL o TWILIO_AUTH_TOKEN -- rechazado.\n")
+                self._send_empty_twiml(403)
+                return
+
+            url_completa = TWILIO_WEBHOOK_BASE_URL + "/whatsapp/inbound"
+            if not whatsapp_inbound.verificar_firma(url_completa, form_params, signature, auth_token):
+                sys.stderr.write("[sidecar] /whatsapp/inbound: firma inválida, request rechazado.\n")
+                self._send_empty_twiml(403)
+                return
+
+            telefono, texto = whatsapp_inbound.extraer_telefono_y_texto(form_params)
+            if not telefono or not texto:
+                sys.stderr.write("[sidecar] /whatsapp/inbound: firma válida pero falta From/Body en el payload.\n")
+                self._send_empty_twiml(200)
+                return
+
+            mensajes_whatsapp.registrar_mensaje_entrante(telefono, texto)
+            sys.stderr.write(f"[sidecar] WhatsApp entrante registrado de {telefono} (el worker va a generar el borrador).\n")
+            self._send_empty_twiml(200)
+        except Exception:
+            sys.stderr.write("[sidecar] ERROR en /whatsapp/inbound: " + traceback.format_exc() + "\n")
+            self._send_empty_twiml(500)
 
 def _serve(host, port, is_lan, ready_callback=None):
     server = ThreadingHTTPServer((host, port), Handler)

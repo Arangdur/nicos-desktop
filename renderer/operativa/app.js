@@ -30,6 +30,7 @@ document.querySelectorAll('[data-tab]').forEach((btn) => {
     if (btn.dataset.tab === 'entrada') loadMisTareas();
     if (btn.dataset.tab === 'mensajes') loadMensajes();
     if (btn.dataset.tab === 'recordatorios') loadRecordatoriosAvisos();
+    if (btn.dataset.tab === 'mensajes-whatsapp') loadMensajesWhatsappTabOperativa();
     if (btn.dataset.tab === 'acerca-de') loadAcercaDe();
   });
 });

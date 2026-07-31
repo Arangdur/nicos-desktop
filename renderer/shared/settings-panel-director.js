@@ -58,6 +58,20 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
     </div>
 
     <div class="card">
+      <h3>WhatsApp — Mensajes entrantes (Bandeja de borradores)</h3>
+      <p class="help-text">
+        Para que NicOS pueda RECIBIR WhatsApp de pacientes (no solo mandar recordatorios)
+        hace falta exponer una única ruta a internet a través de Tailscale Funnel — nunca
+        el resto de la app. Pegá acá la URL pública exacta que te da el Funnel (sin
+        "/whatsapp/inbound" al final, se agrega solo) y configurá esa misma URL +
+        "/whatsapp/inbound" como webhook "WHEN A MESSAGE COMES IN" en la consola de Twilio.
+        Sin este campo, la bandeja de mensajes entrantes queda inactiva sin romper nada más.
+      </p>
+      <label>URL pública del Funnel (ej. https://tu-mac.tailXXXX.ts.net)</label>
+      <input type="text" id="twilio-webhook-base" value="${current.TWILIO_WEBHOOK_BASE_URL || ''}" placeholder="https://macbook-de-nicolas.tailXXXX.ts.net">
+    </div>
+
+    <div class="card">
       <h3>DrApp — Agenda real del consultorio</h3>
       <p class="help-text">
         Para que NicOS lea y gestione turnos reales (disponibilidad, alta, cancelación).
@@ -125,6 +139,7 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
       TWILIO_ACCOUNT_SID: containerEl.querySelector('#twilio-sid').value.trim(),
       TWILIO_WHATSAPP_FROM: containerEl.querySelector('#twilio-from').value.trim(),
       DRAPP_TEAM_ID: containerEl.querySelector('#drapp-team').value.trim(),
+      TWILIO_WEBHOOK_BASE_URL: containerEl.querySelector('#twilio-webhook-base').value.trim().replace(/\/$/, ''),
     };
     const anthropicKey = containerEl.querySelector('#anthropic-key').value.trim();
     const openaiKey = containerEl.querySelector('#openai-key').value.trim();

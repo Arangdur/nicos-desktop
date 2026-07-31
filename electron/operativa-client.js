@@ -227,6 +227,24 @@ function getOutboxCount() {
   return _readOutbox().length;
 }
 
+// ---- Bandeja de mensajes de WhatsApp entrantes (Director + Operativa, con
+// bloqueo por rol del lado del servidor para lo que requiere_profesional) --
+
+async function whatsappMensajesList() {
+  return _authedFetch('/api/v1/whatsapp/mensajes');
+}
+
+async function whatsappMensajeAprobar(mensajeId, textoFinal) {
+  return _authedFetch(`/api/v1/whatsapp/mensajes/${mensajeId}/aprobar`, {
+    method: 'POST',
+    body: JSON.stringify({ texto_final: textoFinal }),
+  });
+}
+
+async function whatsappMensajeRechazar(mensajeId) {
+  return _authedFetch(`/api/v1/whatsapp/mensajes/${mensajeId}/rechazar`, { method: 'POST' });
+}
+
 // ---- Enfermería de Abate (Enfermero-only del lado del servidor) -----------
 
 async function abateListResidentes() {
@@ -266,4 +284,5 @@ module.exports = {
   abateListResidentes, abateGetTratamiento, abateListAdministracionesHoy,
   abateRegistrarAdministracion, abateListNovedades, abateCreateNovedad,
   listRecordatorios,
+  whatsappMensajesList, whatsappMensajeAprobar, whatsappMensajeRechazar,
 };

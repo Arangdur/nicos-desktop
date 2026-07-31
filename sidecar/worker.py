@@ -27,6 +27,7 @@ import ai_router
 import centro_mando_adapter
 import db
 import drapp_client
+import mensajes_whatsapp
 import recordatorios
 import tasks
 import twilio_client
@@ -48,6 +49,13 @@ _ultimo_chequeo_recordatorios = None
 # mañana no cambian cada minuto.
 DRAPP_SYNC_INTERVAL_SECONDS = 600
 _ultimo_sync_drapp = None
+
+# Mensajes de WhatsApp entrantes -- acá sí conviene un intervalo corto: a
+# diferencia de los recordatorios (ventana de horas, no hay apuro), un
+# paciente que mandó un WhatsApp está esperando una respuesta real, así que
+# el borrador se genera lo antes posible para que quien aprueba lo vea rápido.
+MENSAJES_WHATSAPP_CHECK_INTERVAL_SECONDS = 15
+_ultimo_chequeo_mensajes_whatsapp = None
 
 # v0.2.1-rc6: respaldo estructural ADEMÁS del arreglo de la máquina de estados
 # (ver tasks.py) -- ninguna tarea puede pasar por _process_classification()
@@ -490,12 +498,35 @@ def _sincronizar_drapp_si_corresponde():
         recordatorios.sincronizar_desde_drapp(turnos, sincronizado_by="drapp-sync")
 
 
+def _procesar_mensajes_whatsapp_si_corresponde():
+    """Cada mensaje 'recibido' pasa por la IA UNA vez por tick -- si falla
+    (both_failed/auth_error), `generar_borrador` ya lo dejó en
+    'error_clasificacion' con el texto original intacto, así que no se
+    reintenta solo en el próximo tick (evitaría gastar llamadas de IA en
+    bucle si la clave está mal configurada) -- queda visible en la bandeja
+    para que una persona lo redacte a mano."""
+    global _ultimo_chequeo_mensajes_whatsapp
+    ahora = datetime.datetime.now()
+    if _ultimo_chequeo_mensajes_whatsapp is not None:
+        transcurrido = (ahora - _ultimo_chequeo_mensajes_whatsapp).total_seconds()
+        if transcurrido < MENSAJES_WHATSAPP_CHECK_INTERVAL_SECONDS:
+            return
+    _ultimo_chequeo_mensajes_whatsapp = ahora
+
+    for m in mensajes_whatsapp.mensajes_pendientes_de_borrador():
+        try:
+            mensajes_whatsapp.generar_borrador(m["id"])
+        except mensajes_whatsapp.MensajeWhatsappError as e:
+            sys.stderr.write(f"[worker] ERROR generando borrador para mensaje {m['id']}: {e}\n")
+
+
 def run_forever():
     recover_orphaned_tasks()
     sys.stderr.write("[worker] loop arrancado\n")
     while True:
         _procesar_recordatorios_si_corresponde()
         _sincronizar_drapp_si_corresponde()
+        _procesar_mensajes_whatsapp_si_corresponde()
         task = _claim_next_task()
         if task is None:
             time.sleep(POLL_INTERVAL_SECONDS)

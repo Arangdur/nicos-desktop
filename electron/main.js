@@ -37,6 +37,7 @@ function _envFromConfig(config) {
   if (config.TWILIO_WHATSAPP_FROM) env.TWILIO_WHATSAPP_FROM = config.TWILIO_WHATSAPP_FROM;
   if (config.DRAPP_API_KEY) env.DRAPP_API_KEY = config.DRAPP_API_KEY;
   if (config.DRAPP_TEAM_ID) env.DRAPP_TEAM_ID = config.DRAPP_TEAM_ID;
+  if (config.TWILIO_WEBHOOK_BASE_URL) env.NICOS_TWILIO_WEBHOOK_BASE_URL = config.TWILIO_WEBHOOK_BASE_URL;
   return env;
 }
 
@@ -268,6 +269,11 @@ ipcMain.handle('nicos:operativa-list-messages', () => operativaClient.listMessag
 ipcMain.handle('nicos:recordatorios-list', () => operativaClient.listRecordatorios());
 ipcMain.handle('nicos:operativa-update-message', (_event, { row, updates }) =>
   operativaClient.updateMessage(row, updates));
+ipcMain.handle('nicos:whatsapp-mensajes-list', () => operativaClient.whatsappMensajesList());
+ipcMain.handle('nicos:whatsapp-mensaje-aprobar', (_event, { mensajeId, textoFinal }) =>
+  operativaClient.whatsappMensajeAprobar(mensajeId, textoFinal));
+ipcMain.handle('nicos:whatsapp-mensaje-rechazar', (_event, mensajeId) =>
+  operativaClient.whatsappMensajeRechazar(mensajeId));
 
 // ---- IPC exclusivo de la vista Enfermero (Enfermería de Abate) ----
 
