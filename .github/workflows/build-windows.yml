@@ -45,6 +45,16 @@ jobs:
       - name: Instalar dependencias de Electron
         run: npm install
 
+      - name: Generar build-info.json
+        # build/build-info.json está en .gitignore a propósito (se genera por
+        # build, no se commitea) -- localmente lo cubre `npm run dist:win`
+        # (que corre build-info antes de electron-builder), pero este workflow
+        # llama a electron-builder directo, así que sin este paso el .exe
+        # salía sin build-info.json y "Acerca de NicOS" quedaba sin datos de
+        # compilación (hallazgo real, instalación física del 30/07 en la PC
+        # de Marianela).
+        run: npm run build-info
+
       - name: Generar staging sin empaquetar y verificar que no lleva el sidecar
         run: |
           npx electron-builder --win --dir
