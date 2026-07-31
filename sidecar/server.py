@@ -777,6 +777,23 @@ def main():
         lan_thread.start()
         sys.stderr.write(f"[sidecar] servidor de red (Tailscale) escuchando en {TAILSCALE_IP}:{LAN_PORT}\n")
 
+    # Listener dedicado en 127.0.0.1:LAN_PORT, SOLO para Tailscale Funnel --
+    # hallazgo real (31/07): Funnel no puede rebotar tráfico hacia la propia
+    # IP de Tailscale de esta misma máquina (limitación de tailscaled, no de
+    # NicOS), así que su target real siempre termina siendo 127.0.0.1. Este
+    # listener no amplía la superficie expuesta: 127.0.0.1 nunca es alcanzable
+    # desde otra máquina (ni LAN ni internet), solo desde procesos de esta
+    # Mac -- y el único proceso que le va a pegar es tailscaled/Funnel. Corre
+    # con is_lan=True (mismas protecciones que el servidor de Tailscale) --
+    # en la práctica solo /whatsapp/inbound es alcanzable desde afuera vía
+    # Funnel, el resto de las rutas admin siguen pidiendo Bearer token igual.
+    if TWILIO_WEBHOOK_BASE_URL:
+        funnel_thread = threading.Thread(
+            target=_serve, args=("127.0.0.1", LAN_PORT, True), daemon=True
+        )
+        funnel_thread.start()
+        sys.stderr.write(f"[sidecar] servidor para Tailscale Funnel escuchando en 127.0.0.1:{LAN_PORT}\n")
+
     try:
         _serve("127.0.0.1", 0, False, ready_callback=_on_local_ready)
     except KeyboardInterrupt:
