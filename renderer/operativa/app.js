@@ -29,6 +29,7 @@ document.querySelectorAll('[data-tab]').forEach((btn) => {
     switchTab(btn.dataset.tab);
     if (btn.dataset.tab === 'entrada') loadMisTareas();
     if (btn.dataset.tab === 'mensajes') loadMensajes();
+    if (btn.dataset.tab === 'calendario') loadCalendarioTab();
     if (btn.dataset.tab === 'recordatorios') loadRecordatoriosAvisos();
     if (btn.dataset.tab === 'mensajes-whatsapp') loadMensajesWhatsappTabOperativa();
     if (btn.dataset.tab === 'acerca-de') loadAcercaDe();
