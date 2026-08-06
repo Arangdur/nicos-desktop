@@ -1,5 +1,5 @@
 // Panel de Ajustes de la vista DIRECTOR — el único lugar de todo el sistema donde
-// se cargan API keys de IA y credenciales de Google. La vista Operativa usa
+// se cargan API keys de IA, Twilio y DrApp. La vista Operativa usa
 // settings-panel-operativa.js, que NO tiene ninguno de estos campos.
 //
 // `apiBase` es la URL del sidecar LOCAL (127.0.0.1:puerto) — se usa para pairing
@@ -32,14 +32,6 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
       </p>
       <label>IP de Tailscale de esta Mac (empieza con 100.)</label>
       <input type="text" id="tailscale-ip" value="${current.TAILSCALE_IP || ''}" placeholder="100.x.y.z">
-    </div>
-
-    <div class="card">
-      <h3>Google Sheets — Bot WhatsApp Consultorio</h3>
-      <label>ID de la planilla (de la URL de Google Sheets)</label>
-      <input type="text" id="sheet-id" value="${current.WHATSAPP_SHEET_ID || ''}" placeholder="1AbCdEfGh...">
-      <label>Credenciales de la cuenta de servicio (JSON completo) ${current.GOOGLE_SERVICE_ACCOUNT_JSON_configurado ? '— ya configuradas ✓' : '— falta configurar'}</label>
-      <textarea id="google-creds" rows="6" placeholder='{"type": "service_account", ...}'></textarea>
     </div>
 
     <div class="card">
@@ -134,7 +126,6 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
     const update = {
       ANTHROPIC_MODEL: containerEl.querySelector('#anthropic-model').value.trim(),
       OPENAI_MODEL: containerEl.querySelector('#openai-model').value.trim(),
-      WHATSAPP_SHEET_ID: containerEl.querySelector('#sheet-id').value.trim(),
       TAILSCALE_IP: containerEl.querySelector('#tailscale-ip').value.trim(),
       TWILIO_ACCOUNT_SID: containerEl.querySelector('#twilio-sid').value.trim(),
       TWILIO_WHATSAPP_FROM: containerEl.querySelector('#twilio-from').value.trim(),
@@ -143,12 +134,10 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
     };
     const anthropicKey = containerEl.querySelector('#anthropic-key').value.trim();
     const openaiKey = containerEl.querySelector('#openai-key').value.trim();
-    const googleCreds = containerEl.querySelector('#google-creds').value.trim();
     const twilioToken = containerEl.querySelector('#twilio-token').value.trim();
     const drappKey = containerEl.querySelector('#drapp-key').value.trim();
     if (anthropicKey) update.ANTHROPIC_API_KEY = anthropicKey;
     if (openaiKey) update.OPENAI_API_KEY = openaiKey;
-    if (googleCreds) update.GOOGLE_SERVICE_ACCOUNT_JSON = googleCreds;
     if (drappKey) update.DRAPP_API_KEY = drappKey;
     if (twilioToken) update.TWILIO_AUTH_TOKEN = twilioToken;
 

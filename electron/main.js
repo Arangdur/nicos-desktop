@@ -27,8 +27,6 @@ function _envFromConfig(config) {
   const env = {};
   if (config.ANTHROPIC_API_KEY) env.ANTHROPIC_API_KEY = config.ANTHROPIC_API_KEY;
   if (config.OPENAI_API_KEY) env.OPENAI_API_KEY = config.OPENAI_API_KEY;
-  if (config.GOOGLE_SERVICE_ACCOUNT_JSON) env.GOOGLE_SERVICE_ACCOUNT_JSON = config.GOOGLE_SERVICE_ACCOUNT_JSON;
-  if (config.WHATSAPP_SHEET_ID) env.WHATSAPP_SHEET_ID = config.WHATSAPP_SHEET_ID;
   if (config.ANTHROPIC_MODEL) env.ANTHROPIC_MODEL = config.ANTHROPIC_MODEL;
   if (config.OPENAI_MODEL) env.OPENAI_MODEL = config.OPENAI_MODEL;
   if (config.TAILSCALE_IP) env.NICOS_TAILSCALE_IP = config.TAILSCALE_IP;
@@ -265,10 +263,7 @@ ipcMain.handle('nicos:operativa-submit-task', (_event, rawText) => operativaClie
 ipcMain.handle('nicos:operativa-list-tasks', () => operativaClient.listTasks());
 ipcMain.handle('nicos:operativa-flush-outbox', () => operativaClient.flushOutbox());
 ipcMain.handle('nicos:operativa-outbox-count', () => operativaClient.getOutboxCount());
-ipcMain.handle('nicos:operativa-list-messages', () => operativaClient.listMessages());
 ipcMain.handle('nicos:recordatorios-list', () => operativaClient.listRecordatorios());
-ipcMain.handle('nicos:operativa-update-message', (_event, { row, updates }) =>
-  operativaClient.updateMessage(row, updates));
 ipcMain.handle('nicos:whatsapp-mensajes-list', () => operativaClient.whatsappMensajesList());
 ipcMain.handle('nicos:whatsapp-mensaje-aprobar', (_event, { mensajeId, textoFinal }) =>
   operativaClient.whatsappMensajeAprobar(mensajeId, textoFinal));

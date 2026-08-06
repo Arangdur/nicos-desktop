@@ -206,17 +206,6 @@ async function listTasks() {
   return _authedFetch('/api/v1/tasks');
 }
 
-async function listMessages() {
-  return _authedFetch('/api/v1/whatsapp/messages');
-}
-
-async function updateMessage(row, updates) {
-  return _authedFetch('/api/v1/whatsapp/messages/update', {
-    method: 'POST',
-    body: JSON.stringify({ row, updates }),
-  });
-}
-
 // ---- Recordatorios de turno (Director + Operativa leen, solo Director carga) --
 
 async function listRecordatorios() {
@@ -280,7 +269,7 @@ async function abateCreateNovedad(residenteId, categoria, texto) {
 
 module.exports = {
   completeAlta, loginWithPin, listIdentities, getActiveIdentity, logout, forgetIdentity,
-  submitTask, flushOutbox, listTasks, getOutboxCount, listMessages, updateMessage,
+  submitTask, flushOutbox, listTasks, getOutboxCount,
   abateListResidentes, abateGetTratamiento, abateListAdministracionesHoy,
   abateRegistrarAdministracion, abateListNovedades, abateCreateNovedad,
   listRecordatorios,

@@ -40,7 +40,6 @@ import db
 import mensajes_whatsapp
 import pairing
 import recordatorios
-import sheets_client
 import tasks
 import twilio_client
 import whatsapp_inbound
@@ -193,14 +192,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(503, {"ok": False, "error": "el flujo de tareas está desactivado (NICOS_TASK_FLOW_ENABLED=false)"})
                 return
 
-            if self._is_lan() and path in ("/whatsapp/messages", "/director/summary", "/api/v1/system/status"):
+            if self._is_lan() and path in ("/director/summary", "/api/v1/system/status"):
                 self._send_json(403, {"ok": False, "error": "ruta no disponible en la red local"})
                 return
 
-            if path == "/whatsapp/messages":
-                messages = sheets_client.list_messages()
-                self._send_json(200, {"ok": True, "messages": messages})
-            elif path == "/director/summary":
+            if path == "/director/summary":
                 self._send_json(200, {"ok": True, "summary": _director_summary()})
             elif path == "/api/v1/system/status":
                 # v0.2.1-rc7 -- para "Acerca de NicOS". Deliberadamente NO
@@ -239,16 +235,6 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 events = tasks.get_task_events(task_id)
                 self._send_json(200, {"ok": True, "task": task, "events": events})
-            elif path == "/api/v1/whatsapp/messages":
-                # Versión autenticada de /whatsapp/messages, alcanzable desde la LAN
-                # (Marianela) con su token de dispositivo — las credenciales de Google
-                # siguen viviendo solo acá en la Mac, nunca en su PC.
-                auth = self._authenticate()
-                if auth is None:
-                    self._send_json(401, {"ok": False, "error": "token inválido o ausente"})
-                    return
-                messages = sheets_client.list_messages()
-                self._send_json(200, {"ok": True, "messages": messages})
             elif path == "/api/v1/devices":
                 if self._is_lan():
                     self._send_json(403, {"ok": False, "error": "solo disponible localmente"})
@@ -325,8 +311,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True, "mensajes": mensajes_whatsapp.list_mensajes(estado)})
             else:
                 self._send_json(404, {"ok": False, "error": "ruta no encontrada"})
-        except sheets_client.SheetsConfigError as e:
-            self._send_json(200, {"ok": False, "error": str(e)})
         except recordatorios.RecordatorioError as e:
             self._send_json(400, {"ok": False, "error": str(e)})
         except mensajes_whatsapp.MensajeWhatsappError as e:
@@ -361,19 +345,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(503, {"ok": False, "error": "el flujo de tareas está desactivado (NICOS_TASK_FLOW_ENABLED=false)"})
                 return
 
-            if path == "/whatsapp/messages/update":
-                if self._is_lan():
-                    self._send_json(403, {"ok": False, "error": "ruta no disponible en la red local"})
-                    return
-                row = body.get("row")
-                updates = body.get("updates", {})
-                if not row or not isinstance(updates, dict):
-                    self._send_json(400, {"ok": False, "error": "body requiere {row, updates}"})
-                    return
-                result = sheets_client.update_message(row, updates)
-                self._send_json(200, {"ok": True, **result})
-
-            elif path == "/director/chat":
+            if path == "/director/chat":
                 if self._is_lan():
                     self._send_json(403, {"ok": False, "error": "ruta no disponible en la red local"})
                     return
@@ -383,19 +355,6 @@ class Handler(BaseHTTPRequestHandler):
                 context = _director_summary()
                 result = ai_router.ask_director(question, context, history, brain)
                 self._send_json(200, result)
-
-            elif path == "/api/v1/whatsapp/messages/update":
-                auth = self._authenticate()
-                if auth is None:
-                    self._send_json(401, {"ok": False, "error": "token inválido o ausente"})
-                    return
-                row = body.get("row")
-                updates = body.get("updates", {})
-                if not row or not isinstance(updates, dict):
-                    self._send_json(400, {"ok": False, "error": "body requiere {row, updates}"})
-                    return
-                result = sheets_client.update_message(row, updates)
-                self._send_json(200, {"ok": True, **result})
 
             elif path == "/api/v1/pairing/start":
                 if self._is_lan():
@@ -595,8 +554,6 @@ class Handler(BaseHTTPRequestHandler):
 
             else:
                 self._send_json(404, {"ok": False, "error": "ruta no encontrada"})
-        except sheets_client.SheetsConfigError as e:
-            self._send_json(200, {"ok": False, "error": str(e)})
         except json.JSONDecodeError:
             self._send_json(400, {"ok": False, "error": "body no es JSON válido"})
         except abate_enfermeria.AbateError as e:

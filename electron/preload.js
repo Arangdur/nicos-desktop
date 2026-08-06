@@ -27,9 +27,7 @@ contextBridge.exposeInMainWorld('nicos', {
   operativaListTasks: () => ipcRenderer.invoke('nicos:operativa-list-tasks'),
   operativaFlushOutbox: () => ipcRenderer.invoke('nicos:operativa-flush-outbox'),
   operativaOutboxCount: () => ipcRenderer.invoke('nicos:operativa-outbox-count'),
-  operativaListMessages: () => ipcRenderer.invoke('nicos:operativa-list-messages'),
   recordatoriosList: () => ipcRenderer.invoke('nicos:recordatorios-list'),
-  operativaUpdateMessage: (row, updates) => ipcRenderer.invoke('nicos:operativa-update-message', { row, updates }),
   whatsappMensajesList: () => ipcRenderer.invoke('nicos:whatsapp-mensajes-list'),
   whatsappMensajeAprobar: (mensajeId, textoFinal) =>
     ipcRenderer.invoke('nicos:whatsapp-mensaje-aprobar', { mensajeId, textoFinal }),
