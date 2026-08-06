@@ -146,9 +146,9 @@ async function abrirDetalleResidente(residenteId, nombre) {
 function _filaMedicacion(m, idx) {
   return `
     <div class="abate-fila-droga row-wrap" style="margin-top:8px;" data-idx="${idx}">
-      <input type="text" class="abate-droga" placeholder="Droga" value="${escHtml(m.droga)}" style="flex:2;">
-      <input type="text" class="abate-dosis" placeholder="Dosis (ej. 0.5mg)" value="${escHtml(m.dosis)}" style="flex:1;">
-      <input type="text" class="abate-horarios" placeholder="Horarios, separados por coma (ej. 08:00, 20:00)" value="${(m.horarios || []).join(', ')}" style="flex:2;">
+      <input type="text" class="abate-droga" aria-label="Droga" placeholder="Droga" value="${escHtml(m.droga)}" style="flex:2;">
+      <input type="text" class="abate-dosis" aria-label="Dosis" placeholder="Dosis (ej. 0.5mg)" value="${escHtml(m.dosis)}" style="flex:1;">
+      <input type="text" class="abate-horarios" aria-label="Horarios" placeholder="Horarios, separados por coma (ej. 08:00, 20:00)" value="${(m.horarios || []).join(', ')}" style="flex:2;">
     </div>
   `;
 }

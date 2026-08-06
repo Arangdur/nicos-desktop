@@ -89,12 +89,12 @@ async function loadRecordatoriosTab() {
 function _filaTurno(t, idx) {
   return `
     <div class="recordatorio-fila row-wrap" style="margin-top:8px;" data-idx="${idx}">
-      <input type="text" class="rec-nombre" placeholder="Nombre del paciente" value="${escHtml(t.paciente_nombre || '')}" style="flex:2;">
-      <input type="text" class="rec-telefono" placeholder="Teléfono (opcional)" value="${escHtml(t.telefono || '')}" style="flex:1;">
-      <input type="date" class="rec-fecha" value="${t.fecha_turno || ''}" style="flex:1;">
-      <input type="time" class="rec-hora" value="${t.hora_turno || ''}" style="flex:1;">
-      <input type="text" class="rec-cobertura" placeholder="Cobertura" value="${escHtml(t.cobertura || '')}" style="flex:1;">
-      <input type="text" class="rec-practica" placeholder="Práctica" value="${escHtml(t.practica || 'Medicina General')}" style="flex:1;">
+      <input type="text" class="rec-nombre" aria-label="Nombre del paciente" placeholder="Nombre del paciente" value="${escHtml(t.paciente_nombre || '')}" style="flex:2;">
+      <input type="text" class="rec-telefono" aria-label="Teléfono" placeholder="Teléfono (opcional)" value="${escHtml(t.telefono || '')}" style="flex:1;">
+      <input type="date" class="rec-fecha" aria-label="Fecha del turno" value="${t.fecha_turno || ''}" style="flex:1;">
+      <input type="time" class="rec-hora" aria-label="Hora del turno" value="${t.hora_turno || ''}" style="flex:1;">
+      <input type="text" class="rec-cobertura" aria-label="Cobertura" placeholder="Cobertura" value="${escHtml(t.cobertura || '')}" style="flex:1;">
+      <input type="text" class="rec-practica" aria-label="Práctica" placeholder="Práctica" value="${escHtml(t.practica || 'Medicina General')}" style="flex:1;">
     </div>
   `;
 }
