@@ -247,7 +247,30 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
     });
     const data = await res.json();
     if (data.ok) {
-      el.innerHTML = `Código: <b style="font-size:20px; letter-spacing:2px;">${data.code}</b> — válido 5 minutos. Decíselo a ${displayName} para que lo escriba en su PC.`;
+      // v0.2.5 -- Impeccable P0: antes esto era solo el código de 6 dígitos,
+      // y la persona nueva tenía que ADEMÁS escribir a mano la IP de
+      // Tailscale de esta Mac en un campo aparte -- pedirle eso a alguien
+      // sin perfil técnico (ver PRODUCT.md) era el hallazgo más grave del
+      // audit de diseño. Ahora se arma un único código combinado
+      // (código@IP) que ${displayName} pega en un solo campo -- ella nunca
+      // tiene que saber qué es una IP ni de dónde sacarla.
+      const ip = current.TAILSCALE_IP || '';
+      const combinado = ip ? `${data.code}@${ip}` : data.code;
+      el.innerHTML = `
+        <div>Código para ${escHtml(displayName)} — válido 5 minutos:</div>
+        <div class="row-wrap" style="margin-top:6px; align-items:center;">
+          <b style="font-size:18px; letter-spacing:1px; font-family:monospace;">${escHtml(combinado)}</b>
+          <button class="secondary" id="btn-copiar-codigo" style="padding:4px 10px; font-size:12px;">Copiar</button>
+        </div>
+        <p class="help-text" style="margin-top:4px;">
+          Mandaselo tal cual (por WhatsApp, mensaje, o en persona) — lo pega entero en el único
+          campo "Código de vinculación" de su pantalla, no hace falta que escriba nada más.
+        </p>
+      `;
+      el.querySelector('#btn-copiar-codigo').addEventListener('click', async () => {
+        await navigator.clipboard.writeText(combinado);
+        showToast('Copiado.');
+      });
       loadDevices();
     } else {
       el.innerHTML = `<span style="color:var(--red);">${data.error}</span>`;

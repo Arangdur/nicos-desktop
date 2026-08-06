@@ -81,13 +81,11 @@
       <input type="password" id="alta-pin" maxlength="4" inputmode="numeric" placeholder="····" style="max-width:120px; letter-spacing:6px; text-align:center;">
       <p class="help-text" style="margin-top:4px;">No es una contraseña de seguridad -- solo evita que se cargue algo a tu nombre por error en un dispositivo compartido.</p>
 
-      <label style="margin-top:var(--space-3);">Código de 6 dígitos</label>
-      <input type="text" id="alta-codigo" placeholder="000000" maxlength="6" inputmode="numeric">
-
-      <div id="campo-ip">
-        <label style="margin-top:var(--space-3);">IP de Tailscale de la Mac de Nicolás</label>
-        <input type="text" id="alta-ip" placeholder="100.x.y.z">
-      </div>
+      <label style="margin-top:var(--space-3);">Código de vinculación</label>
+      <input type="text" id="alta-codigo" placeholder="482910@100.x.y.z" autocapitalize="off" autocorrect="off">
+      <p class="help-text" id="ayuda-codigo" style="margin-top:4px;">
+        Pegalo tal cual como te lo mandó Nicolás — es un solo código, no hace falta separarlo en partes.
+      </p>
 
       <div id="alta-status" style="margin-top:var(--space-3); font-size:13px;"></div>
 
