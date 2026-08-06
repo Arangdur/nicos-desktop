@@ -7,6 +7,7 @@ let API = null; // se arma una vez sabemos el puerto real del sidecar
 
 let chatHistory = [];
 let currentBrain = 'claude';
+let cfoChart = null; // instancia de Chart.js del gráfico de barras del Resumen -- se destruye y recrea en cada loadResumen()
 
 function fmtNum(n) {
   if (n === null || n === undefined || Number.isNaN(n)) return '—';
@@ -193,6 +194,44 @@ function _wireAtencionClicks() {
   });
 }
 
+// v0.2.5 -- gráfico de barras Ingresos/Gastos/Saldo, mismo concepto que ya
+// usa jarvis-trabajo/dashboard.html (cfo-balance-chart) pero con Chart.js
+// vendorizado acá mismo (renderer/shared/vendor/chart.umd.min.js) en vez de
+// la CDN que usa ese dashboard viejo -- NicOS nunca depende de la red para
+// su interfaz. El guard `typeof Chart === 'undefined'` es el mismo patrón
+// defensivo que ya usaba el dashboard viejo por si el script no cargó.
+function _dibujarGraficoCfo(cfo) {
+  const ctx = document.getElementById('cfo-chart');
+  if (!ctx || typeof Chart === 'undefined') return;
+  if (cfoChart) { cfoChart.destroy(); cfoChart = null; }
+
+  const ingresos = cfo.total_ingresos_mes || 0;
+  const gastos = cfo.total_gastos_mes || 0;
+  const saldo = cfo.saldo_mes || 0;
+  const colorSaldo = saldo >= 0 ? '#038139' : '#d22525'; // mismos tokens --green/--red de styles.css
+
+  cfoChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: ['Ingresos', 'Gastos', 'Saldo'],
+      datasets: [{
+        data: [ingresos, gastos, saldo],
+        backgroundColor: ['#038139', '#d22525', colorSaldo],
+        borderRadius: 6,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { ticks: { callback: (v) => '$' + fmtNum(v), font: { size: 10 } }, grid: { color: '#e2e6ec' } },
+        x: { grid: { display: false }, ticks: { font: { size: 12 } } },
+      },
+    },
+  });
+}
+
 async function loadResumen() {
   const el = document.getElementById('tab-resumen');
   el.innerHTML = '<div class="empty">Cargando...</div>';
@@ -226,6 +265,7 @@ async function loadResumen() {
           </div>
           ${freshTag(cfo.actualizado)}
         </div>
+        <div class="chart-box"><canvas id="cfo-chart"></canvas></div>
         ${(cfo.ultimos_movimientos || []).length > 0 ? `
           <table style="margin-top:var(--space-3);">
             <tr><th>Fecha</th><th>Concepto</th><th>Monto</th></tr>
@@ -286,6 +326,7 @@ async function loadResumen() {
     </div>
   `;
 
+  _dibujarGraficoCfo(cfo);
   await _refrescarAtencion();
 }
 

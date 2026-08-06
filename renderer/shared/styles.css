@@ -427,3 +427,8 @@ tr:last-child td { border-bottom: none; }
 .metric { padding: var(--space-2) 0; }
 .metric .metric-label { font-size: var(--text-xs); color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
 .metric .metric-value { font-size: var(--text-xl); font-weight: 700; color: var(--text); margin-top: 2px; }
+
+/* Contenedor de gráficos Chart.js -- necesita una altura fija en el padre
+   porque Chart.js con maintainAspectRatio:false llena el 100% de lo que
+   encuentre, y un <canvas> sin límite de altura crece sin parar. */
+.chart-box { position: relative; height: 200px; margin-top: var(--space-3); }
