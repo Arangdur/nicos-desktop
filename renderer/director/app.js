@@ -52,13 +52,68 @@ document.querySelectorAll('[data-tab]').forEach((btn) => {
   btn.addEventListener('click', () => {
     switchTab(btn.dataset.tab);
     if (btn.dataset.tab === 'tareas') renderTasksList();
-    if (btn.dataset.tab === 'abate') loadAbateTab();
+    if (btn.dataset.tab === 'abate') { loadAbateTab(); _marcarAbateVisto(); }
     if (btn.dataset.tab === 'recordatorios') loadRecordatoriosTab();
     if (btn.dataset.tab === 'mensajes-whatsapp') loadMensajesWhatsappTab();
     if (btn.dataset.tab === 'ajustes') loadAjustes();
     if (btn.dataset.tab === 'acerca-de') loadAcercaDe();
   });
 });
+
+// v0.2.5 -- "novedades sin leer" de Abate: no existe un concepto de
+// leído/no-leído en la base (abate_novedades no tiene esa columna, y
+// agregarla es una migración que no hace falta para esto). En cambio, se
+// guarda acá mismo (en esta Mac, donde vive el Director) la última vez que
+// se abrió la pestaña Abate -- "sin leer" pasa a significar honestamente
+// "cargada después de la última vez que entraste a mirar", que es lo que
+// de verdad le importa a Nicolás en el Resumen.
+const ABATE_VISITA_KEY = 'nicos_abate_ultima_visita';
+function _marcarAbateVisto() {
+  try { localStorage.setItem(ABATE_VISITA_KEY, new Date().toISOString()); } catch (e) { /* no bloquea nada si falla */ }
+}
+function _abateUltimaVisita() {
+  try { return localStorage.getItem(ABATE_VISITA_KEY) || '1970-01-01T00:00:00'; } catch (e) { return '1970-01-01T00:00:00'; }
+}
+
+// Mismo cálculo de "atrasada" que ya usa renderer/enfermero/app.js
+// (_horarioVencido) -- se repite acá porque son dos vistas/archivos
+// distintos, no porque la lógica cambie.
+function _horarioVencidoDir(horario) {
+  const [h, m] = horario.split(':').map(Number);
+  const ahora = new Date();
+  return (h * 60 + m) < (ahora.getHours() * 60 + ahora.getMinutes());
+}
+
+async function _cargarConteosAbate() {
+  const residentesData = await fetchJson('/api/v1/abate/residentes').catch(() => null);
+  const residentes = residentesData && residentesData.ok ? residentesData.residentes : [];
+
+  const [tratamientos, administraciones, novedadesData] = await Promise.all([
+    Promise.all(residentes.map((r) => fetchJson(`/api/v1/abate/residentes/${r.residente_id}/tratamiento`).catch(() => null))),
+    Promise.all(residentes.map((r) => fetchJson(`/api/v1/abate/residentes/${r.residente_id}/administraciones`).catch(() => null))),
+    fetchJson('/api/v1/abate/novedades').catch(() => null),
+  ]);
+
+  let medicacionAtrasada = 0;
+  residentes.forEach((r, i) => {
+    const trat = tratamientos[i] && tratamientos[i].ok ? tratamientos[i].tratamiento : null;
+    if (!trat) return;
+    const admins = administraciones[i] && administraciones[i].ok ? administraciones[i].administraciones : [];
+    const yaAdministradas = new Set(admins.map((a) => `${a.droga}|${a.horario_previsto}`));
+    (trat.medicacion || []).forEach((m) => {
+      (m.horarios || []).forEach((h) => {
+        if (!yaAdministradas.has(`${m.droga}|${h}`) && _horarioVencidoDir(h)) medicacionAtrasada++;
+      });
+    });
+  });
+
+  const ultimaVisita = _abateUltimaVisita();
+  const novedadesNuevas = novedadesData && novedadesData.ok
+    ? novedadesData.novedades.filter((n) => n.created_at > ultimaVisita).length
+    : 0;
+
+  return { medicacionAtrasada, novedadesNuevas };
+}
 
 function loadAcercaDe() {
   renderAboutPanel(document.getElementById('tab-acerca-de'));
@@ -72,10 +127,11 @@ function loadAcercaDe() {
 // usan sus pestañas -- no hay lógica nueva del lado del servidor, solo se
 // reusa y se resume acá.
 async function _cargarConteosAtencion() {
-  const [tareas, mensajes, recordatorios] = await Promise.all([
+  const [tareas, mensajes, recordatorios, abate] = await Promise.all([
     fetchJson('/api/v1/tasks?state=pending_approval').catch(() => null),
     fetchJson('/api/v1/whatsapp/mensajes').catch(() => null),
     fetchJson('/api/v1/recordatorios').catch(() => null),
+    _cargarConteosAbate(),
   ]);
   return {
     tareas: tareas && tareas.ok ? tareas.tasks.length : 0,
@@ -85,6 +141,8 @@ async function _cargarConteosAtencion() {
     turnos: recordatorios && recordatorios.ok
       ? recordatorios.recordatorios.filter((r) => r.estado === 'sin_telefono' || r.estado === 'fallo_envio').length
       : 0,
+    medicacionAtrasada: abate.medicacionAtrasada,
+    novedadesNuevas: abate.novedadesNuevas,
   };
 }
 
@@ -93,6 +151,8 @@ function _renderAtencionHtml(counts) {
     { n: counts.tareas, label: counts.tareas === 1 ? 'tarea esperando tu aprobación' : 'tareas esperando tu aprobación', tab: 'tareas' },
     { n: counts.whatsapp, label: counts.whatsapp === 1 ? 'mensaje de WhatsApp con borrador esperando' : 'mensajes de WhatsApp con borrador esperando', tab: 'mensajes-whatsapp' },
     { n: counts.turnos, label: counts.turnos === 1 ? 'turno necesita atención (sin teléfono o falló el envío)' : 'turnos necesitan atención (sin teléfono o falló el envío)', tab: 'recordatorios' },
+    { n: counts.medicacionAtrasada || 0, label: counts.medicacionAtrasada === 1 ? 'toma de Abate atrasada sin confirmar' : 'tomas de Abate atrasadas sin confirmar', tab: 'abate' },
+    { n: counts.novedadesNuevas || 0, label: counts.novedadesNuevas === 1 ? 'novedad nueva de Abate' : 'novedades nuevas de Abate', tab: 'abate' },
   ].filter((i) => i.n > 0);
 
   if (items.length === 0) {
