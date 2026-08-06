@@ -135,7 +135,13 @@ document.getElementById('btn-completar-alta').addEventListener('click', async ()
     }
     // Éxito: main process ya cargó la pantalla real del rol correspondiente.
   } catch (e) {
-    statusEl.textContent = e.message || 'No se pudo conectar con la Mac.';
+    // v0.2.5 -- Impeccable P2: `e.message` acá casi siempre existe (es un
+    // error real de IPC/Electron, ej. "Error invoking remote method..."),
+    // así que el `||` de antes nunca llegaba a mostrar el mensaje amigable.
+    // Se muestra siempre el mensaje en español; el técnico queda en consola
+    // para diagnóstico.
+    console.error('Error completando alta:', e);
+    statusEl.textContent = 'No se pudo conectar con la Mac. Probá de nuevo en un momento.';
     statusEl.style.color = 'var(--red)';
   }
 });

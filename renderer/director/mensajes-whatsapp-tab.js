@@ -68,9 +68,19 @@ async function _renderListaMensajesWhatsapp() {
 
     if (btnAprobar) {
       btnAprobar.addEventListener('click', async () => {
+        const texto_final = textarea.value.trim();
+        // v0.2.5 -- Impeccable P1: era la única acción que mandaba algo hacia
+        // afuera (un mensaje real a un paciente) sin ningún paso de
+        // confirmación, mientras acciones de menor riesgo (aprobar una
+        // tarea, revocar un acceso) sí la tenían -- se pareja acá.
+        const ok = await showConfirm(
+          'Enviar esta respuesta',
+          `Se va a mandar por WhatsApp a ${escHtml(m.telefono)}:<br><br>"${escHtml(texto_final)}"`,
+          { confirmLabel: 'Enviar' },
+        );
+        if (!ok) return;
         btnAprobar.disabled = true;
         btnAprobar.textContent = 'Enviando...';
-        const texto_final = textarea.value.trim();
         const result = await mensajesWhatsappFetch(`/api/v1/whatsapp/mensajes/${m.id}/aprobar`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ texto_final }),

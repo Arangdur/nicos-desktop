@@ -11,11 +11,18 @@
   --text: #1c2333;
   --muted: #6b7280;
   --muted-soft: #9aa2b1;
-  --green: #1f9d55;
+  /* v0.2.5 -- Impeccable P2: --green y --red medidos contra sus propios
+     fondos (.tag.resuelto y el toast de éxito con texto blanco) daban
+     3.18:1 y 3.49:1 -- por debajo del mínimo WCAG AA de 4.5:1 para texto
+     normal. Se oscurecen ambos tonos lo justo para pasar en las dos
+     direcciones (texto de color sobre fondo claro, y texto blanco sobre el
+     color de fondo) sin cambiar qué color "es" -- verificado con la fórmula
+     de contraste real, no a ojo. */
+  --green: #038139;
   --green-bg: #e9f8ee;
   --amber: #b45309;
   --amber-bg: #fef3cd;
-  --red: #dc2626;
+  --red: #d22525;
   --red-bg: #fdecec;
   --blue: #2563eb;
   --blue-bg: #eaf1ff;
@@ -359,6 +366,20 @@ tr:last-child td { border-bottom: none; }
 }
 .toast.error { background: var(--red); }
 .toast.success { background: var(--green); }
+
+/* v0.2.5 -- Impeccable P2: para labels que asocian con for/id pero cuyo
+   texto ya está cubierto visualmente por otro elemento (un <h3>, un
+   párrafo de ayuda) -- oculta solo visualmente, sigue leyéndose con lector
+   de pantalla. Patrón estándar, no propio. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }

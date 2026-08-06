@@ -74,17 +74,17 @@ function renderTable() {
           <td>${escHtml(m.Telefono)}</td>
           <td style="max-width:220px;">${escHtml(m.Notas)}</td>
           <td>
-            <select class="edit-estado">
+            <select class="edit-estado" aria-label="Estado">
               <option value="Nuevo" ${m.Estado === 'Nuevo' ? 'selected' : ''}>Nuevo</option>
               <option value="En proceso" ${m.Estado === 'En proceso' ? 'selected' : ''}>En proceso</option>
               <option value="Resuelto" ${m.Estado === 'Resuelto' ? 'selected' : ''}>Resuelto</option>
             </select>
           </td>
-          <td><input type="text" class="edit-nombre" value="${escHtml(m.Nombre)}"></td>
-          <td><input type="text" class="edit-apellido" value="${escHtml(m.Apellido)}"></td>
-          <td><input type="text" class="edit-obrasocial" value="${escHtml(m['Obra Social'])}"></td>
+          <td><input type="text" class="edit-nombre" aria-label="Nombre" value="${escHtml(m.Nombre)}"></td>
+          <td><input type="text" class="edit-apellido" aria-label="Apellido" value="${escHtml(m.Apellido)}"></td>
+          <td><input type="text" class="edit-obrasocial" aria-label="Obra Social" value="${escHtml(m['Obra Social'])}"></td>
           <td>
-            <select class="edit-urgente">
+            <select class="edit-urgente" aria-label="Urgente">
               <option value="" ${!m.Urgente ? 'selected' : ''}>No</option>
               <option value="Si" ${m.Urgente === 'Si' ? 'selected' : ''}>Sí</option>
             </select>

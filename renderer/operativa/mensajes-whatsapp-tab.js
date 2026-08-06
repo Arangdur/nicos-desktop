@@ -61,9 +61,18 @@ async function _renderListaMensajesWhatsappOperativa() {
 
     if (btnAprobar) {
       btnAprobar.addEventListener('click', async () => {
+        const texto_final = textarea.value.trim();
+        // v0.2.5 -- Impeccable P1: mismo fix que el lado Director -- ver
+        // mensajes-whatsapp-tab.js de esa vista para el detalle completo.
+        const ok = await showConfirm(
+          'Enviar esta respuesta',
+          `Se va a mandar por WhatsApp a ${escHtml(m.telefono)}:<br><br>"${escHtml(texto_final)}"`,
+          { confirmLabel: 'Enviar' },
+        );
+        if (!ok) return;
         btnAprobar.disabled = true;
         btnAprobar.textContent = 'Enviando...';
-        const result = await window.nicos.whatsappMensajeAprobar(m.id, textarea.value.trim());
+        const result = await window.nicos.whatsappMensajeAprobar(m.id, texto_final);
         if (!result.ok) {
           showToast(result.error, 'error');
           btnAprobar.disabled = false;

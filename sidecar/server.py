@@ -332,8 +332,14 @@ class Handler(BaseHTTPRequestHandler):
         except mensajes_whatsapp.MensajeWhatsappError as e:
             self._send_json(400, {"ok": False, "error": str(e)})
         except Exception as e:
+            # v0.2.5 -- Impeccable P2: antes esto mandaba str(e) tal cual a la
+            # interfaz -- para una excepción no prevista, eso es texto de
+            # Python en inglés (ej. "ConnectionRefusedError: [Errno 61]...")
+            # que Marianela no tiene forma de entender ni de actuar. El
+            # detalle completo se sigue logueando acá abajo para diagnóstico;
+            # lo que ve la persona es un mensaje genérico y accionable.
             sys.stderr.write("[sidecar] ERROR: " + traceback.format_exc() + "\n")
-            self._send_json(500, {"ok": False, "error": str(e)})
+            self._send_json(500, {"ok": False, "error": "Hubo un problema del lado del servidor -- probá de nuevo, y si sigue fallando avisale a Nicolás."})
 
     def do_POST(self):
         parsed = urlparse(self.path)
@@ -602,8 +608,14 @@ class Handler(BaseHTTPRequestHandler):
         except (twilio_client.TwilioConfigError, twilio_client.TwilioSendError) as e:
             self._send_json(502, {"ok": False, "error": str(e)})
         except Exception as e:
+            # v0.2.5 -- Impeccable P2: antes esto mandaba str(e) tal cual a la
+            # interfaz -- para una excepción no prevista, eso es texto de
+            # Python en inglés (ej. "ConnectionRefusedError: [Errno 61]...")
+            # que Marianela no tiene forma de entender ni de actuar. El
+            # detalle completo se sigue logueando acá abajo para diagnóstico;
+            # lo que ve la persona es un mensaje genérico y accionable.
             sys.stderr.write("[sidecar] ERROR: " + traceback.format_exc() + "\n")
-            self._send_json(500, {"ok": False, "error": str(e)})
+            self._send_json(500, {"ok": False, "error": "Hubo un problema del lado del servidor -- probá de nuevo, y si sigue fallando avisale a Nicolás."})
 
     def _handle_task_action(self, path, body, action):
         if self._is_lan():

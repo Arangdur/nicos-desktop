@@ -46,6 +46,7 @@
       <button class="secondary" id="btn-volver-login" style="padding:6px 10px; font-size:12px; margin-bottom:var(--space-3);">&larr; Volver</button>
       <h3 id="pin-nombre" style="margin-bottom:4px;">Hola</h3>
       <p class="help-text" style="margin-bottom:var(--space-3);">Ingresá tu PIN de 4 dígitos para confirmar que sos vos.</p>
+      <label for="pin-input" class="sr-only">PIN de 4 dígitos</label>
       <input type="password" id="pin-input" maxlength="4" inputmode="numeric" placeholder="····" class="pin-pad-input">
       <div id="pin-status" style="text-align:center; margin-top:var(--space-2); font-size:13px;"></div>
       <button class="primary" id="btn-entrar" style="width:100%; margin-top:var(--space-4);">Entrar</button>
@@ -55,20 +56,20 @@
       <h3 style="margin-bottom:4px;">Alta con código</h3>
       <p class="help-text" style="margin-bottom:var(--space-3);">Nicolás te tiene que haber dado un código de 6 dígitos (válido 5 minutos). Si no lo tenés, pedíselo antes de seguir.</p>
 
-      <label>Tu nombre completo</label>
+      <label for="alta-nombre">Tu nombre completo</label>
       <input type="text" id="alta-nombre" placeholder="Ej. Daniela Fernández">
 
-      <label style="margin-top:var(--space-3);">DNI</label>
+      <label for="alta-dni" style="margin-top:var(--space-3);">DNI</label>
       <input type="text" id="alta-dni" placeholder="Ej. 30123456" inputmode="numeric">
 
       <div class="row-wrap" style="margin-top:var(--space-3); align-items:flex-end;">
         <div style="flex:1;">
-          <label>Fecha de nacimiento</label>
+          <label for="alta-nacimiento">Fecha de nacimiento</label>
           <input type="date" id="alta-nacimiento">
         </div>
       </div>
 
-      <label style="margin-top:var(--space-3);">Sexo</label>
+      <label for="alta-sexo" style="margin-top:var(--space-3);">Sexo</label>
       <select id="alta-sexo">
         <option value="">Elegí una opción</option>
         <option value="F">Femenino</option>
@@ -77,11 +78,11 @@
         <option value="NC">Prefiero no decir</option>
       </select>
 
-      <label style="margin-top:var(--space-3);">Elegí un PIN de 4 dígitos</label>
+      <label for="alta-pin" style="margin-top:var(--space-3);">Elegí un PIN de 4 dígitos</label>
       <input type="password" id="alta-pin" maxlength="4" inputmode="numeric" placeholder="····" style="max-width:120px; letter-spacing:6px; text-align:center;">
       <p class="help-text" style="margin-top:4px;">No es una contraseña de seguridad -- solo evita que se cargue algo a tu nombre por error en un dispositivo compartido.</p>
 
-      <label style="margin-top:var(--space-3);">Código de vinculación</label>
+      <label for="alta-codigo" style="margin-top:var(--space-3);">Código de vinculación</label>
       <input type="text" id="alta-codigo" placeholder="482910@100.x.y.z" autocapitalize="off" autocorrect="off">
       <p class="help-text" id="ayuda-codigo" style="margin-top:4px;">
         Pegalo tal cual como te lo mandó Nicolás — es un solo código, no hace falta separarlo en partes.
