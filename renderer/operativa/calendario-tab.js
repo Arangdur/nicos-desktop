@@ -129,11 +129,18 @@ function _renderCalendario() {
     ${filasHtml.join('')}
   `;
 
+  // v0.2.5 -- Impeccable P1 (re-critique): las celdas eran <div> con solo
+  // click -- Tab las saltaba entero, no había forma de abrir el detalle de
+  // un día con el teclado.
   document.querySelectorAll('[data-cal-dia]').forEach((celda) => {
-    celda.addEventListener('click', () => {
+    const abrir = () => {
       calendarioDiaSeleccionado = celda.dataset.calDia;
       _renderCalendario();
       _renderListaDia();
+    };
+    celda.addEventListener('click', abrir);
+    celda.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir(); }
     });
   });
 
@@ -149,7 +156,7 @@ function _celdaDia(dia, hoyISO) {
   const esSeleccionado = fechaISO === calendarioDiaSeleccionado;
 
   return `
-    <div data-cal-dia="${fechaISO}" style="
+    <div data-cal-dia="${fechaISO}" tabindex="0" role="button" aria-label="Turnos del día ${dia}" style="
       min-height:56px; padding:6px; border-radius:var(--radius-sm); cursor:pointer;
       border:1px solid ${esSeleccionado ? 'var(--navy)' : 'var(--border)'};
       background:${esSeleccionado ? 'var(--navy-soft)' : 'var(--card-bg)'};

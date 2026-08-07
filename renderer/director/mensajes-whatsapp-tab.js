@@ -10,9 +10,10 @@ const CLASIFICACION_LABEL = {
   turno_nuevo: 'Turno nuevo', cancelacion: 'Cancelación', reprogramacion: 'Reprogramación',
   consulta_general: 'Consulta general', receta: 'Receta', ambiguo: 'Ambiguo',
 };
+// v0.2.5 -- Impeccable P2 (re-critique): mismo fix que operativa/mensajes-whatsapp-tab.js.
 const ESTADO_MENSAJE_TAG = {
   recibido: { clase: 'proceso', label: 'Procesando...' },
-  borrador_generado: { clase: 'nuevo', label: 'Borrador listo' },
+  borrador_generado: { clase: 'proceso', label: 'Borrador listo' },
   error_clasificacion: { clase: 'nuevo', label: 'Sin borrador (falló la IA)' },
   aprobado_enviado: { clase: 'resuelto', label: 'Enviado' },
   rechazado: { clase: '', label: 'Rechazado' },
@@ -97,6 +98,10 @@ async function _renderListaMensajesWhatsapp() {
     }
 
     btnRechazar.addEventListener('click', async () => {
+      // v0.2.5 -- Impeccable P2 (re-critique): mismo fix que Operativa -- ver
+      // esa vista para el detalle.
+      const ok = await showConfirm('Rechazar este mensaje', 'El borrador se descarta, no se manda nada.', { confirmLabel: 'Rechazar', danger: true });
+      if (!ok) return;
       btnRechazar.disabled = true;
       const result = await mensajesWhatsappFetch(`/api/v1/whatsapp/mensajes/${m.id}/rechazar`, { method: 'POST' });
       if (!result.ok) { showToast(result.error, 'error'); btnRechazar.disabled = false; return; }
@@ -139,7 +144,7 @@ function _cardMensaje(m) {
 
       ${accionable ? `
         <label style="margin-top:var(--space-3);">${m.estado === 'error_clasificacion' ? 'Tu respuesta' : 'Borrador (editable)'}</label>
-        <textarea class="texto-respuesta" rows="3" ${bloqueadoParaMi ? 'disabled' : ''}>${escHtml(m.borrador_respuesta || '')}</textarea>
+        <textarea class="texto-respuesta" rows="3" aria-label="${m.estado === 'error_clasificacion' ? 'Tu respuesta' : 'Borrador (editable)'}" ${bloqueadoParaMi ? 'disabled' : ''}>${escHtml(m.borrador_respuesta || '')}</textarea>
         ${bloqueadoParaMi ? '<p class="help-text" style="color:var(--red);">Este mensaje toca algo clínico — solo el Director puede aprobarlo.</p>' : ''}
         <div class="row-wrap" style="margin-top:var(--space-2);">
           ${bloqueadoParaMi ? '' : '<button class="primary btn-aprobar">Aprobar y enviar</button>'}

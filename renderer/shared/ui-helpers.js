@@ -29,9 +29,14 @@ function _modal({ title, body, fields = [], confirmLabel = 'Confirmar', cancelLa
       <label>${f.label}</label>
       <textarea id="modal-field-${i}" rows="${f.rows || 2}" placeholder="${f.placeholder || ''}"></textarea>
     `).join('');
+    // v0.2.5 -- Impeccable P1 (re-critique): el modal no tenía role="dialog"
+    // ni aria-modal (un lector de pantalla no se enteraba de que se abrió
+    // nada), no movía el foco adentro, no lo devolvía al cerrar, y no se
+    // podía cancelar con Escape -- justo el modal que se usa para confirmar
+    // el envío de WhatsApp, la acción más sensible de toda la app.
     backdrop.innerHTML = `
-      <div class="modal-box">
-        <h4>${title}</h4>
+      <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <h4 id="modal-title">${title}</h4>
         ${body ? `<p>${body}</p>` : ''}
         ${fieldsHtml}
         <div class="modal-actions">
@@ -40,12 +45,18 @@ function _modal({ title, body, fields = [], confirmLabel = 'Confirmar', cancelLa
         </div>
       </div>
     `;
+    const focoAnterior = document.activeElement;
     document.body.appendChild(backdrop);
+    (backdrop.querySelector(`#modal-field-0`) || backdrop.querySelector('#modal-confirm')).focus();
 
     const cleanup = (result) => {
       backdrop.remove();
+      document.removeEventListener('keydown', onKeydown);
+      if (focoAnterior && focoAnterior.focus) focoAnterior.focus();
       resolve(result);
     };
+    const onKeydown = (e) => { if (e.key === 'Escape') cleanup(null); };
+    document.addEventListener('keydown', onKeydown);
     backdrop.querySelector('#modal-cancel').addEventListener('click', () => cleanup(null));
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) cleanup(null); });
     backdrop.querySelector('#modal-confirm').addEventListener('click', () => {

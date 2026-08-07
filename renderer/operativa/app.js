@@ -57,7 +57,13 @@ async function init() {
 
   setInterval(() => {
     updateOutboxBadge();
-    if (document.getElementById('tab-entrada').style.display !== 'none') loadMisTareas();
+    // v0.2.5 -- Impeccable P1 (re-critique): antes solo se llamaba con la
+    // pestaña Entrada visible -- el badge "vinculado" del header quedaba
+    // fijo para siempre aunque la Mac se desconectara. loadMisTareas() ya
+    // sabe distinguir offline de verdad (result.offline) y ahora actualiza
+    // el badge con eso -- se llama siempre, esté o no la pestaña a la vista
+    // (el elemento sigue en el DOM oculto, actualizarlo es barato).
+    loadMisTareas();
   }, 20000);
 }
 

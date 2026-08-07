@@ -27,13 +27,21 @@ async function renderAboutPanel(containerEl) {
   const info = await window.nicos.getAboutInfo();
   const build = info.build;
 
+  // v0.2.5 -- Impeccable P2 (re-critique): antes esto se mostraba igual para
+  // los tres roles -- Marianela veía commit hash y SHA-256 de risk_policy.yaml,
+  // texto técnico sin ningún uso para ella (y que en el detector de Sam se
+  // leía como "pantalla de error"). El Director sigue viendo todo -- lo
+  // técnico le sirve para diagnosticar. Los demás roles solo ven la versión.
+  const esDirector = info.role === 'director';
   const buildBlock = build ? `
     <dl class="kv-grid">
       <dt>Versión</dt><dd>${escHtmlAbout(build.version)}</dd>
-      <dt>Commit</dt><dd class="mono">${escHtmlAbout(build.commit_sha_short)}</dd>
-      ${build.git_dirty ? '<dt></dt><dd><span class="tag nuevo">con cambios sin commitear</span></dd>' : ''}
-      <dt>Fecha de build</dt><dd>${escHtmlAbout(new Date(build.build_date).toLocaleString('es-AR'))}</dd>
-      <dt>Hash de risk_policy.yaml</dt><dd class="mono">${escHtmlAbout(build.risk_policy_sha256)}</dd>
+      ${esDirector ? `
+        <dt>Commit</dt><dd class="mono">${escHtmlAbout(build.commit_sha_short)}</dd>
+        ${build.git_dirty ? '<dt></dt><dd><span class="tag nuevo">con cambios sin commitear</span></dd>' : ''}
+        <dt>Fecha de build</dt><dd>${escHtmlAbout(new Date(build.build_date).toLocaleString('es-AR'))}</dd>
+        <dt>Hash de risk_policy.yaml</dt><dd class="mono">${escHtmlAbout(build.risk_policy_sha256)}</dd>
+      ` : ''}
     </dl>
   ` : `
     <div class="empty">Sin datos de compilación -- esto es normal corriendo desde el código fuente (npx electron .) en vez de un paquete instalado. Se genera con "npm run dist:mac" / "dist:win".</div>

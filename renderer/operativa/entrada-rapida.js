@@ -12,7 +12,7 @@ async function loadEntradaRapida() {
         Escribí con tus palabras — por ejemplo "Registrar pago de electricidad de Abate por $450.000"
         o "Cargá un ingreso de $1.200.000 de Hospital Posse". NicOS decide a dónde va.
       </p>
-      <textarea id="entrada-texto" rows="3" placeholder="Contame qué pasó..."></textarea>
+      <textarea id="entrada-texto" rows="3" aria-label="Registrar algo" placeholder="Contame qué pasó..."></textarea>
       <div id="entrada-status" style="font-size:var(--text-sm); margin:var(--space-3) 0;"></div>
       <button class="primary" id="btn-enviar-entrada">Enviar</button>
     </div>
@@ -61,6 +61,12 @@ async function loadMisTareas() {
   const el = document.getElementById('mis-tareas-list');
   if (!el) return;
   const result = await window.nicos.operativaListTasks();
+  // v0.2.5 -- Impeccable P1 (re-critique): antes el badge del header decía
+  // "vinculado" una sola vez al arrancar y nunca más -- no reflejaba si la
+  // Mac seguía realmente alcanzable. Esta es la misma llamada que ya
+  // distingue offline de verdad (operativa-client.js), se reusa acá.
+  const badge = document.getElementById('server-status');
+  if (badge) badge.textContent = result.offline ? 'sin conexión con la Mac' : 'vinculado';
   if (result.offline) {
     el.innerHTML = `<div class="error-box">${result.error}</div>`;
     return;
@@ -87,7 +93,7 @@ async function loadMisTareas() {
   el.innerHTML = result.tasks.slice(0, 10).map((t) => `
     <div class="row" style="padding:var(--space-2) 0; border-bottom:1px solid var(--border-soft); font-size:var(--text-sm);">
       <span class="tag ${ESTADO_TAG_CLASS[t.state] || 'proceso'}">${ESTADO_LABEL[t.state] || t.state}</span>
-      <span>${t.raw_text}</span>
+      <span>${escHtml(t.raw_text)}</span>
     </div>
   `).join('');
 }
