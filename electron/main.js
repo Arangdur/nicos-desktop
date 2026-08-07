@@ -119,12 +119,27 @@ function createWindow() {
   _bootAndLoad();
 }
 
-app.whenReady().then(() => {
-  createWindow();
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+// Sin esto, abrir la app dos veces (doble-click de nuevo, relaunch) levanta
+// dos procesos Electron, cada uno con su propio sidecar Python -- root cause
+// del bug de "procesos duplicados". requestSingleInstanceLock mata el
+// segundo intento y en vez de eso enfoca la ventana que ya está abierta.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
   });
-});
+
+  app.whenReady().then(() => {
+    createWindow();
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+}
 
 app.on('window-all-closed', () => {
   sidecar.stopSidecar();
