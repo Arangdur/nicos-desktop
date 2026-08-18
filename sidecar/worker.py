@@ -27,6 +27,7 @@ import ai_router
 import centro_mando_adapter
 import db
 import drapp_client
+import facturas
 import mensajes_whatsapp
 import recordatorios
 import tasks
@@ -56,6 +57,13 @@ _ultimo_sync_drapp = None
 # el borrador se genera lo antes posible para que quien aprueba lo vea rápido.
 MENSAJES_WHATSAPP_CHECK_INTERVAL_SECONDS = 15
 _ultimo_chequeo_mensajes_whatsapp = None
+
+# Pedidos de factura -- mismo intervalo corto que los mensajes, misma razón
+# (alguien está esperando el borrador para poder aprobarlo). Genera SOLO el
+# borrador (monto/concepto/cliente) -- nunca emite, eso sigue siendo 100%
+# manual vía /api/v1/facturas/<id>/aprobar, Director-only (ver facturas.py).
+FACTURAS_CHECK_INTERVAL_SECONDS = 15
+_ultimo_chequeo_facturas = None
 
 # v0.2.1-rc6: respaldo estructural ADEMÁS del arreglo de la máquina de estados
 # (ver tasks.py) -- ninguna tarea puede pasar por _process_classification()
@@ -520,6 +528,26 @@ def _procesar_mensajes_whatsapp_si_corresponde():
             sys.stderr.write(f"[worker] ERROR generando borrador para mensaje {m['id']}: {e}\n")
 
 
+def _procesar_facturas_si_corresponde():
+    """Mismo criterio que _procesar_mensajes_whatsapp_si_corresponde: un
+    único intento de IA por tick, nunca reintenta solo si falla (queda en
+    'error_extraccion', visible para armar el borrador a mano). Esta función
+    SOLO arma el borrador -- jamás llama a facturas.aprobar_y_emitir."""
+    global _ultimo_chequeo_facturas
+    ahora = datetime.datetime.now()
+    if _ultimo_chequeo_facturas is not None:
+        transcurrido = (ahora - _ultimo_chequeo_facturas).total_seconds()
+        if transcurrido < FACTURAS_CHECK_INTERVAL_SECONDS:
+            return
+    _ultimo_chequeo_facturas = ahora
+
+    for f in facturas.pedidos_pendientes_de_borrador():
+        try:
+            facturas.generar_borrador(f["id"])
+        except facturas.FacturaError as e:
+            sys.stderr.write(f"[worker] ERROR generando borrador de factura {f['id']}: {e}\n")
+
+
 def run_forever():
     recover_orphaned_tasks()
     sys.stderr.write("[worker] loop arrancado\n")
@@ -527,6 +555,7 @@ def run_forever():
         _procesar_recordatorios_si_corresponde()
         _sincronizar_drapp_si_corresponde()
         _procesar_mensajes_whatsapp_si_corresponde()
+        _procesar_facturas_si_corresponde()
         task = _claim_next_task()
         if task is None:
             time.sleep(POLL_INTERVAL_SECONDS)

@@ -2,3 +2,11 @@ anthropic>=0.40.0
 openai>=1.40.0
 pyinstaller>=6.0.0
 PyYAML>=6.0
+# facturacion/ (bot de facturación ARCA) -- segno: QR sin dependencias (no
+# arrastra Pillow). fpdf2: generación de PDF simple, puro Python. requests:
+# wsfe_client.py lo necesita para el SOAP contra ARCA -- estaba instalado en
+# el venv pero nunca se había agregado acá, así que un venv nuevo no
+# arrancaba el sidecar entero (server.py importa facturas al toque).
+segno>=1.6.0
+fpdf2>=2.7.0
+requests>=2.31.0

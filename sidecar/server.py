@@ -37,6 +37,7 @@ import ai_router
 import centro_mando_adapter
 import clinical_guard
 import db
+import facturas
 import mensajes_whatsapp
 import pairing
 import recordatorios
@@ -54,6 +55,18 @@ TAILSCALE_IP = os.getenv("NICOS_TAILSCALE_IP", "").strip()
 # carácter). Configurable desde Ajustes, se setea recién cuando el Funnel
 # está activo -- mientras esté vacía, /whatsapp/inbound rechaza todo.
 TWILIO_WEBHOOK_BASE_URL = os.getenv("NICOS_TWILIO_WEBHOOK_BASE_URL", "").strip().rstrip("/")
+
+# v0.2.6 -- números de teléfono autorizados a PEDIR una factura por WhatsApp
+# (formato E.164, ej. "+5493513334455", separados por coma si hay más de
+# uno). El número del consultorio es el mismo al que escriben los pacientes
+# -- sin esto, cualquiera que le mande "facturale..." generaría un borrador
+# de factura real. La firma de Twilio (ver whatsapp_inbound.verificar_firma)
+# solo prueba que el mensaje vino de Twilio de verdad, NUNCA prueba quién es
+# el remitente -- este chequeo es el único que sí lo hace. Si está vacío,
+# NADIE puede pedir facturas por WhatsApp (falla cerrado, no abierto).
+FACTURACION_TELEFONOS_AUTORIZADOS = {
+    t.strip() for t in os.getenv("NICOS_FACTURACION_TELEFONOS_AUTORIZADOS", "").split(",") if t.strip()
+}
 
 # Rollback real (v0.2.1): apaga el flujo de tareas/aprobación sin tocar código
 # ni perder lo demás -- /director/summary y /director/chat (lo que ya andaba
@@ -309,11 +322,34 @@ class Handler(BaseHTTPRequestHandler):
                     qs = parse_qs(parsed.query)
                 estado = qs.get("estado", [None])[0]
                 self._send_json(200, {"ok": True, "mensajes": mensajes_whatsapp.list_mensajes(estado)})
+            elif path == "/api/v1/facturas":
+                # Ver la bandeja es Director + Operativa (igual que mensajes) --
+                # pero aprobar/rechazar (más abajo, en do_POST) es Director-only
+                # sin excepción, ver nota en facturas.py.
+                auth = self._require_role(self._authenticate(), {"director", "operativa"})
+                if auth is None:
+                    return
+                qs = {}
+                if parsed.query:
+                    from urllib.parse import parse_qs
+                    qs = parse_qs(parsed.query)
+                estado = qs.get("estado", [None])[0]
+                self._send_json(200, {"ok": True, "facturas": facturas.list_facturas(estado)})
+            elif path.startswith("/facturas/") and path.endswith("/pdf"):
+                # Ruta PÚBLICA (como /whatsapp/inbound) -- Twilio tiene que poder
+                # descargar el PDF sin autenticarse para adjuntarlo al WhatsApp.
+                # Único control: el id es un secrets.token_hex(8) impredecible
+                # (mismo criterio que mensajes_whatsapp_entrantes) y solo se
+                # sirve si la factura ya está 'emitida' -- nunca antes.
+                self._handle_factura_pdf(path.split("/")[2])
+                return
             else:
                 self._send_json(404, {"ok": False, "error": "ruta no encontrada"})
         except recordatorios.RecordatorioError as e:
             self._send_json(400, {"ok": False, "error": str(e)})
         except mensajes_whatsapp.MensajeWhatsappError as e:
+            self._send_json(400, {"ok": False, "error": str(e)})
+        except facturas.FacturaError as e:
             self._send_json(400, {"ok": False, "error": str(e)})
         except Exception as e:
             # v0.2.5 -- Impeccable P2: antes esto mandaba str(e) tal cual a la
@@ -324,6 +360,28 @@ class Handler(BaseHTTPRequestHandler):
             # lo que ve la persona es un mensaje genérico y accionable.
             sys.stderr.write("[sidecar] ERROR: " + traceback.format_exc() + "\n")
             self._send_json(500, {"ok": False, "error": "Hubo un problema del lado del servidor -- probá de nuevo, y si sigue fallando avisale a Nicolás."})
+
+    def _handle_factura_pdf(self, factura_id):
+        """Sirve el PDF de una factura ya emitida -- ruta pública, ver nota
+        en do_GET. Nunca sirve nada que no esté 'emitida' (evita filtrar un
+        borrador con datos incompletos, y evita servir un archivo que
+        todavía no se terminó de escribir a disco)."""
+        try:
+            todas = facturas.list_facturas()
+            factura = next((f for f in todas if f["id"] == factura_id), None)
+            if factura is None or factura["estado"] != "emitida" or not factura["pdf_path"]:
+                self._send_json(404, {"ok": False, "error": "factura no encontrada"})
+                return
+            with open(factura["pdf_path"], "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception:
+            sys.stderr.write("[sidecar] ERROR en /facturas/<id>/pdf: " + traceback.format_exc() + "\n")
+            self._send_json(500, {"ok": False, "error": "no se pudo servir el PDF"})
 
     def do_POST(self):
         parsed = urlparse(self.path)
@@ -552,6 +610,38 @@ class Handler(BaseHTTPRequestHandler):
                 result = mensajes_whatsapp.rechazar(mensaje_id, auth["user_id"])
                 self._send_json(200, result)
 
+            elif path.startswith("/api/v1/facturas/") and path.endswith("/aprobar"):
+                # Director-only, SIN excepción para Operativa -- a diferencia
+                # de mensajes/aprobar, acá no hay "si no es clínico, puede
+                # Marianela": emitir una factura real en ARCA es siempre un
+                # acto fiscal, ver facturas.aprobar_y_emitir.
+                auth = self._require_role(self._authenticate(), {"director"})
+                if auth is None:
+                    return
+                factura_id = path.split("/")[4]
+                monto_final = body.get("monto_final")
+                concepto_final = body.get("concepto_final") or None
+                factura_asociada_id = body.get("factura_asociada_id") or None
+                try:
+                    result = facturas.aprobar_y_emitir(
+                        factura_id, auth["user_id"], auth["role"],
+                        monto_final, concepto_final, factura_asociada_id,
+                    )
+                    self._send_json(200, result)
+                except facturas.RequiereDirector as e:
+                    self._send_json(403, {"ok": False, "error": str(e)})
+
+            elif path.startswith("/api/v1/facturas/") and path.endswith("/rechazar"):
+                auth = self._require_role(self._authenticate(), {"director"})
+                if auth is None:
+                    return
+                factura_id = path.split("/")[4]
+                try:
+                    result = facturas.rechazar(factura_id, auth["user_id"], auth["role"])
+                    self._send_json(200, result)
+                except facturas.RequiereDirector as e:
+                    self._send_json(403, {"ok": False, "error": str(e)})
+
             else:
                 self._send_json(404, {"ok": False, "error": "ruta no encontrada"})
         except json.JSONDecodeError:
@@ -561,6 +651,8 @@ class Handler(BaseHTTPRequestHandler):
         except recordatorios.RecordatorioError as e:
             self._send_json(400, {"ok": False, "error": str(e)})
         except mensajes_whatsapp.MensajeWhatsappError as e:
+            self._send_json(400, {"ok": False, "error": str(e)})
+        except facturas.FacturaError as e:
             self._send_json(400, {"ok": False, "error": str(e)})
         except (twilio_client.TwilioConfigError, twilio_client.TwilioSendError) as e:
             self._send_json(502, {"ok": False, "error": str(e)})
@@ -688,8 +780,32 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_empty_twiml(200)
                 return
 
-            mensajes_whatsapp.registrar_mensaje_entrante(telefono, texto)
-            sys.stderr.write(f"[sidecar] WhatsApp entrante registrado de {telefono} (el worker va a generar el borrador).\n")
+            # Enrutamiento por palabra clave, no por IA -- más barato y
+            # suficiente (mismo patrón que usa Tramitito: el usuario escribe
+            # "facturale..."). Si algún día hace falta algo más fino,
+            # ai_router ya tiene el extractor -- por ahora un match de texto
+            # alcanza para separar "pedido de factura" de "mensaje a paciente".
+            #
+            # PERO "factur"/"crédito" en el texto NO alcanza solo -- el
+            # número del consultorio es el mismo al que escriben los
+            # pacientes, así que además hay que verificar que el REMITENTE
+            # sea Nicolás (ver FACTURACION_TELEFONOS_AUTORIZADOS). Si alguien
+            # más manda "facturale..." o "nota de crédito...", NO entra a la
+            # bandeja de facturas -- cae como mensaje normal a la bandeja de
+            # pacientes, tal cual si no hubiera dicho esa palabra.
+            texto_lower = texto.lower()
+            es_pedido_factura = (
+                ("factur" in texto_lower or "credito" in texto_lower or "crédito" in texto_lower)
+                and telefono in FACTURACION_TELEFONOS_AUTORIZADOS
+            )
+            if es_pedido_factura:
+                facturas.registrar_pedido_factura(telefono, texto)
+                sys.stderr.write(f"[sidecar] Pedido de factura registrado de {telefono} (el worker va a armar el borrador).\n")
+            else:
+                if "factur" in texto_lower or "credito" in texto_lower or "crédito" in texto_lower:
+                    sys.stderr.write(f"[sidecar] Mensaje con \"factura\"/\"crédito\" de {telefono} -- NO está en la lista autorizada, va a la bandeja de pacientes.\n")
+                mensajes_whatsapp.registrar_mensaje_entrante(telefono, texto)
+                sys.stderr.write(f"[sidecar] WhatsApp entrante registrado de {telefono} (el worker va a generar el borrador).\n")
             self._send_empty_twiml(200)
         except Exception:
             sys.stderr.write("[sidecar] ERROR en /whatsapp/inbound: " + traceback.format_exc() + "\n")

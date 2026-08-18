@@ -6,6 +6,7 @@ sidecar/.venv/
 sidecar/build/
 sidecar/dist/
 sidecar/__pycache__/
+**/__pycache__/
 *.pyc
 .DS_Store
 sidecar/nicos.db
@@ -14,3 +15,10 @@ sidecar/nicos.db-shm
 sidecar/nicos.db.bak-*
 sidecar/backups/
 sidecar/attachments/
+
+# Facturación ARCA -- comprobantes reales (datos fiscales de clientes) y
+# credenciales. El repo es público desde hoy: esto NUNCA debe commitearse.
+sidecar/facturas_pdf/
+*.crt
+*.key
+arca-certificado/

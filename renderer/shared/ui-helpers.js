@@ -74,3 +74,18 @@ function showPrompt(title, body, { placeholder = '', confirmLabel = 'Confirmar' 
   return _modal({ title, body, fields: [{ label: '', placeholder, rows: 3 }], confirmLabel })
     .then((r) => (Array.isArray(r) ? r[0] : null));
 }
+
+// v0.2.6 -- heurística para frenar antes de aprobar un borrador de WhatsApp
+// que afirma un precio o una cobertura de obra social (ver ai_router.py,
+// regla 5 del prompt de mensajes: la IA no debería inventar esto, pero un
+// borrador igual puede colarse con algo así, y quien aprueba puede no
+// releerlo con cuidado -- esto es la señal visual, no un bloqueo real, para
+// que salte a la vista antes de un clic apurado). Deliberadamente sobre-
+// inclusiva: prefiere marcar de más a que se escape un precio inventado.
+const _PRECIO_PATRON = /\$\s?\d|(?<!\d)\d{3,}\s*(pesos|ars)\b/i;
+const _COBERTURA_PATRON = /obra\s+social|prepaga|cobertura|cubre|reintegr/i;
+
+function detectarPrecioOCobertura(texto) {
+  if (!texto) return false;
+  return _PRECIO_PATRON.test(texto) || _COBERTURA_PATRON.test(texto);
+}

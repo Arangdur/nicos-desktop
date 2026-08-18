@@ -407,7 +407,13 @@ horario, nunca propone uno.
 personalmente -- no intenta resolver el contenido médico.
 3. Tono cordial, breve (2-4 líneas), en español rioplatense, firmado como "Consultorio Dr. Nicolás \
 Buso" -- mismo estilo que ya usa el sistema de recordatorios.
-4. Si es ambiguo, el borrador pide que aclare qué necesita, sin asumir nada."""
+4. Si es ambiguo, el borrador pide que aclare qué necesita, sin asumir nada.
+5. NUNCA afirmes un precio, un valor de consulta, ni si una obra social/prepaga específica está \
+cubierta o es aceptada -- no tenés esa información real, y afirmarla mal es una promesa del \
+consultorio que después hay que cumplir (caso real: un tribunal canadiense obligó a Air Canada a \
+honrar un descuento que había inventado su propio chatbot). Si preguntan por precio u obra social, \
+el borrador dice que alguien del consultorio va a confirmar ese dato puntual, nunca da un número o \
+una respuesta sí/no como si fuera un hecho."""
 
 MENSAJE_WHATSAPP_JSON_SCHEMA = {
     "name": "clasificacion_mensaje_whatsapp",
@@ -523,6 +529,167 @@ def clasificar_y_redactar_mensaje(texto: str, provider: str = None) -> dict:
         return {"outcome": "both_failed", "error": first["error"], "attempts": attempts}
 
     second = _try_clasificar_mensaje(alternate, texto)
+    attempts.append(second)
+
+    if second["status"] == "success":
+        return {
+            "outcome": "success", "data": second["data"], "provider": alternate,
+            "fell_back_from": provider, "attempts": attempts,
+        }
+
+    combined_error = f"{provider}: {first['error']} | {alternate}: {second['error']}"
+    return {"outcome": "both_failed", "error": combined_error, "attempts": attempts}
+
+
+# v0.2.6 -- extracción de pedidos de factura para el bot de facturación ARCA
+# (ver CFO y Decisiones Estrategicas/Proyecto_Facturacion_WhatsApp_ARCA.md).
+# Mismo patrón de resiliencia que extract()/clasificar_y_redactar_mensaje().
+# A diferencia de esos dos, esto NUNCA dispara una emisión real -- solo arma
+# el borrador que Nicolás tiene que aprobar (ver facturas.py, Director-only,
+# sin excepción -- una factura mal armada es un problema fiscal real).
+
+FACTURA_SYSTEM_PROMPT = """Convertís un pedido de factura en texto libre (WhatsApp) en datos \
+estructurados para armar una Factura C de Monotributo en ARCA, o una Nota de Crédito C si el \
+pedido pide corregir/anular una factura ya emitida. Ejemplos: "facturale 80 lucas a Marta por el \
+arreglo del baño", "factura de 45000 por consulta, consumidor final", "nota de crédito de 500 \
+pesos para paula", "anulá la factura de juan, hacé una nota de crédito".
+
+`es_nota_credito`: true SOLO si el texto pide explícitamente una "nota de crédito", anular, \
+corregir o dar de baja una factura ya hecha. Si es un pedido de factura normal, false.
+
+`monto`: en pesos, como número. "80 lucas" = 80000, "15 palos" = 15000000. Nunca inventes un monto \
+si el texto no lo trae con claridad -- ahí dejalo null.
+
+`concepto`: descripción breve de qué se cobra o qué se corrige (ej. "Consulta médica", "Arreglo \
+del baño", "Corrección de importe"). Si no se menciona nada específico, usá "Servicios \
+profesionales".
+
+`cliente_nombre`: el nombre de la persona a quien se factura o se le hace la nota de crédito, si \
+lo menciona. Si dice "consumidor final" o no menciona a nadie, null.
+
+`cliente_doc_tipo`/`cliente_doc_nro`: SOLO si el texto trae explícitamente un CUIT o DNI del \
+cliente -- 80 para CUIT, 96 para DNI. Si no hay documento mencionado, ambos null (la factura sale \
+a Consumidor Final, eso lo decide el código después, no vos).
+
+Nunca inventes un monto, concepto o documento que no esté claramente en el texto. Vos NUNCA \
+decidís a qué factura corresponde una nota de crédito -- eso lo elige Nicolás a mano antes de \
+aprobar, no es parte de tu tarea."""
+
+FACTURA_JSON_SCHEMA = {
+    "name": "pedido_factura",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "es_nota_credito": {"type": "boolean"},
+            "monto": {"type": ["number", "null"]},
+            "concepto": {"type": "string"},
+            "cliente_nombre": {"type": ["string", "null"]},
+            "cliente_doc_tipo": {"type": ["integer", "null"], "enum": [80, 96, None]},
+            "cliente_doc_nro": {"type": ["integer", "null"]},
+        },
+        "required": [
+            "es_nota_credito", "monto", "concepto", "cliente_nombre",
+            "cliente_doc_tipo", "cliente_doc_nro",
+        ],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
+_REQUIRED_FACTURA_KEYS = set(FACTURA_JSON_SCHEMA["schema"]["required"])
+
+
+def _validate_factura_shape(data):
+    if not isinstance(data, dict):
+        return f"la respuesta no es un objeto JSON (vino {type(data).__name__})"
+    missing = _REQUIRED_FACTURA_KEYS - set(data.keys())
+    if missing:
+        return f"faltan campos requeridos: {', '.join(sorted(missing))}"
+    monto = data.get("monto")
+    if monto is not None and not isinstance(monto, (int, float)):
+        return f"'monto' no es numérico: {monto!r}"
+    if not isinstance(data.get("concepto"), str) or not data["concepto"].strip():
+        return "'concepto' vacío o no es texto"
+    if not isinstance(data.get("es_nota_credito"), bool):
+        return f"'es_nota_credito' no es booleano: {data.get('es_nota_credito')!r}"
+    return None
+
+
+def _try_extraer_factura(provider_name: str, texto: str) -> dict:
+    if provider_name == "openai":
+        client = _get_openai_client()
+        if client is None:
+            return {"status": "auth_error", "provider": "openai", "error": _openai_error}
+        try:
+            resp = client.chat.completions.create(
+                model=os.getenv("OPENAI_MODEL", "gpt-5"),
+                messages=[
+                    {"role": "system", "content": FACTURA_SYSTEM_PROMPT},
+                    {"role": "user", "content": texto},
+                ],
+                response_format={"type": "json_schema", "json_schema": FACTURA_JSON_SCHEMA},
+            )
+            raw_content = resp.choices[0].message.content
+            try:
+                data = json.loads(raw_content)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"status": "malformed", "provider": "openai", "error": f"JSON inválido: {e}"}
+        except Exception as e:
+            status = "auth_error" if _classify_exception(e) == "auth" else "transient_error"
+            return {"status": status, "provider": "openai", "error": f"{type(e).__name__}: {e}"}
+    else:
+        client = _get_claude_client()
+        if client is None:
+            return {"status": "auth_error", "provider": "claude", "error": _claude_error}
+        try:
+            resp = client.messages.create(
+                model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5"),
+                max_tokens=400,
+                system=FACTURA_SYSTEM_PROMPT,
+                tools=[{
+                    "name": "pedido_factura",
+                    "description": "Datos estructurados extraídos de un pedido de factura en texto libre.",
+                    "input_schema": FACTURA_JSON_SCHEMA["schema"],
+                }],
+                tool_choice={"type": "tool", "name": "pedido_factura"},
+                messages=[{"role": "user", "content": texto}],
+            )
+            tool_block = next((b for b in resp.content if b.type == "tool_use"), None)
+            if tool_block is None:
+                return {"status": "malformed", "provider": "claude", "error": "la respuesta no incluyó el tool_use esperado"}
+            data = tool_block.input
+        except Exception as e:
+            status = "auth_error" if _classify_exception(e) == "auth" else "transient_error"
+            return {"status": status, "provider": "claude", "error": f"{type(e).__name__}: {e}"}
+
+    shape_error = _validate_factura_shape(data)
+    if shape_error:
+        return {"status": "malformed", "provider": provider_name, "error": shape_error}
+    return {"status": "success", "provider": provider_name, "data": data}
+
+
+def extraer_pedido_factura(texto: str, provider: str = None) -> dict:
+    """Mismo contrato que extract()/clasificar_y_redactar_mensaje() --
+    'outcome': 'success' | 'auth_error' | 'both_failed'. Presupuesto duro:
+    2 llamadas HTTP reales. Nunca decide si se emite -- eso es 100% de
+    facturas.py + la aprobación de Nicolás."""
+    provider = provider or get_provider_for("extraer_factura", default="claude")
+    alternate = "claude" if provider == "openai" else "openai"
+
+    attempts = []
+    first = _try_extraer_factura(provider, texto)
+    attempts.append(first)
+
+    if first["status"] == "success":
+        return {"outcome": "success", "data": first["data"], "provider": provider, "attempts": attempts}
+
+    if first["status"] == "auth_error":
+        return {"outcome": "auth_error", "provider": provider, "error": first["error"], "attempts": attempts}
+
+    if not get_provider_matrix().get("fallback_on_primary_failure", True):
+        return {"outcome": "both_failed", "error": first["error"], "attempts": attempts}
+
+    second = _try_extraer_factura(alternate, texto)
     attempts.append(second)
 
     if second["status"] == "success":

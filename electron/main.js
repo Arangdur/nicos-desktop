@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -36,6 +36,7 @@ function _envFromConfig(config) {
   if (config.DRAPP_API_KEY) env.DRAPP_API_KEY = config.DRAPP_API_KEY;
   if (config.DRAPP_TEAM_ID) env.DRAPP_TEAM_ID = config.DRAPP_TEAM_ID;
   if (config.TWILIO_WEBHOOK_BASE_URL) env.NICOS_TWILIO_WEBHOOK_BASE_URL = config.TWILIO_WEBHOOK_BASE_URL;
+  if (config.FACTURACION_TELEFONOS_AUTORIZADOS) env.NICOS_FACTURACION_TELEFONOS_AUTORIZADOS = config.FACTURACION_TELEFONOS_AUTORIZADOS;
   return env;
 }
 
@@ -114,6 +115,16 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  // v0.2.6 -- un target="_blank" (ej. "Ver PDF" de una factura emitida) por
+  // default intenta abrir una ventana de Electron nueva sin barra de
+  // direcciones ni forma de cerrarla bien. Se manda al navegador real del
+  // sistema en su lugar -- patrón estándar de Electron, no hay nada
+  // propio que mantener.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
   });
 
   _bootAndLoad();

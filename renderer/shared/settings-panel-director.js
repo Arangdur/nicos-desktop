@@ -64,6 +64,18 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
     </div>
 
     <div class="card">
+      <h3>Facturación por WhatsApp — quién puede pedir una factura</h3>
+      <p class="help-text">
+        El número de WhatsApp del consultorio es el mismo al que te escriben los pacientes —
+        sin esto, cualquiera que mande "facturale..." generaría un borrador de factura real.
+        Poné tu propio número (formato +549..., el mismo con el que hablás por WhatsApp),
+        separados por coma si usás más de uno. Vacío = nadie puede pedir facturas por WhatsApp.
+      </p>
+      <label>Tu(s) número(s) de WhatsApp autorizados</label>
+      <input type="text" id="facturacion-telefonos" value="${current.FACTURACION_TELEFONOS_AUTORIZADOS || ''}" placeholder="+5493513334455">
+    </div>
+
+    <div class="card">
       <h3>DrApp — Agenda real del consultorio</h3>
       <p class="help-text">
         Para que NicOS lea y gestione turnos reales (disponibilidad, alta, cancelación).
@@ -131,6 +143,7 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
       TWILIO_WHATSAPP_FROM: containerEl.querySelector('#twilio-from').value.trim(),
       DRAPP_TEAM_ID: containerEl.querySelector('#drapp-team').value.trim(),
       TWILIO_WEBHOOK_BASE_URL: containerEl.querySelector('#twilio-webhook-base').value.trim().replace(/\/$/, ''),
+      FACTURACION_TELEFONOS_AUTORIZADOS: containerEl.querySelector('#facturacion-telefonos').value.trim(),
     };
     const anthropicKey = containerEl.querySelector('#anthropic-key').value.trim();
     const openaiKey = containerEl.querySelector('#openai-key').value.trim();

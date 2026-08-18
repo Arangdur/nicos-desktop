@@ -143,6 +143,12 @@ function _cardMensaje(m) {
       ` : ''}
 
       ${accionable ? `
+        ${detectarPrecioOCobertura(m.borrador_respuesta) ? `
+          <div class="error-box" style="margin-top:var(--space-2);">
+            Este borrador menciona un precio o una cobertura de obra social — confirmá que sea
+            un dato real antes de aprobar, la IA no tiene acceso a esa información.
+          </div>
+        ` : ''}
         <label style="margin-top:var(--space-3);">${m.estado === 'error_clasificacion' ? 'Tu respuesta' : 'Borrador (editable)'}</label>
         <textarea class="texto-respuesta" rows="3" aria-label="${m.estado === 'error_clasificacion' ? 'Tu respuesta' : 'Borrador (editable)'}" ${bloqueadoParaMi ? 'disabled' : ''}>${escHtml(m.borrador_respuesta || '')}</textarea>
         ${bloqueadoParaMi ? '<p class="help-text" style="color:var(--red);">Este mensaje toca algo clínico — solo el Director puede aprobarlo.</p>' : ''}
