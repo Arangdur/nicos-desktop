@@ -172,10 +172,16 @@ def list_turnos_medicina_general(desde: str, hasta: str):
 
 def buscar_paciente_por_telefono(telefono: str):
     """Devuelve el primer paciente que coincide, o None si no hay ninguno --
-    nunca inventa ni asume una coincidencia parcial."""
+    nunca inventa ni asume una coincidencia parcial.
+
+    v0.2.6 -- este endpoint devuelve un array DIRECTO (`type: array` en el
+    spec real, confirmado con una request real contra el sandbox), no
+    `{"data": [...]}` como se había asumido antes sin poder probarlo contra
+    la API de verdad -- la versión vieja explotaba (AttributeError) apenas
+    hubiera un match real, y el test que lo cubría mockeaba la forma
+    incorrecta, así que nunca lo detectó."""
     _, team_id = _config()
-    resultado = _request("GET", f"/teams/{team_id}/consumers", params={"phone": telefono}) or {}
-    pacientes = resultado.get("data", [])
+    pacientes = _request("GET", f"/teams/{team_id}/consumers", params={"phone": telefono}) or []
     return pacientes[0] if pacientes else None
 
 

@@ -170,13 +170,15 @@ class TestPacientes(unittest.TestCase):
 
     @patch("drapp_client.urllib.request.urlopen")
     def test_buscar_paciente_por_telefono_sin_match_devuelve_none(self, mock_urlopen):
-        mock_urlopen.return_value = _fake_response({"data": []})
+        # v0.2.6 -- /consumers devuelve un array DIRECTO, no {"data": [...]}
+        # -- confirmado con una request real contra el sandbox de DrApp.
+        mock_urlopen.return_value = _fake_response([])
         paciente = drapp_client.buscar_paciente_por_telefono("+5493537000000")
         self.assertIsNone(paciente)
 
     @patch("drapp_client.urllib.request.urlopen")
     def test_buscar_paciente_por_telefono_con_match(self, mock_urlopen):
-        mock_urlopen.return_value = _fake_response({"data": [{"id": "consumers/xyz789", "firstName": "María"}]})
+        mock_urlopen.return_value = _fake_response([{"id": "consumers/xyz789", "firstName": "María"}])
         paciente = drapp_client.buscar_paciente_por_telefono("+5491155678901")
         self.assertEqual(paciente["id"], "consumers/xyz789")
 
