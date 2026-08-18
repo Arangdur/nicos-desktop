@@ -541,6 +541,173 @@ def clasificar_y_redactar_mensaje(texto: str, provider: str = None) -> dict:
     return {"outcome": "both_failed", "error": combined_error, "attempts": attempts}
 
 
+MAIL_SYSTEM_PROMPT_POR_CASILLA = {
+    "consultorio": (
+        "Sos el asistente que arma BORRADORES de respuesta para los mails que le llegan al "
+        "consultorio del Dr. Nicolás Buso (novogen.salud@gmail.com) -- mails de pacientes, de DrApp, "
+        "o de cualquiera. Firmá como \"Consultorio Dr. Nicolás Buso\"."
+    ),
+    "abate": (
+        "Sos el asistente que arma BORRADORES de respuesta para los mails que le llegan a la "
+        "Fundación Abate (fundacion.abate@gmail.com). Firmá como \"Fundación Abate\"."
+    ),
+}
+
+# v0.2.6 -- clasificación + borrador para el mail entrante de las dos casillas
+# (ver mail_entrante.py). Mismo patrón de resiliencia y mismas reglas de oro
+# que clasificar_y_redactar_mensaje() -- la IA nunca manda nada sola, nunca
+# inventa un horario, nunca resuelve nada clínico ni promete precio/cobertura.
+# A diferencia de WhatsApp, acá la aprobación es SIEMPRE Director-only (ver
+# migración 012), así que no hace falta un campo requiere_profesional --
+# simplemente no existe una vía "Operativa puede" para mail.
+
+MAIL_JSON_SCHEMA = {
+    "name": "clasificacion_mail",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "categoria": {
+                "type": "string",
+                "enum": ["turno", "administrativo", "medico", "queja", "spam", "otro"],
+            },
+            "borrador_respuesta": {"type": "string"},
+        },
+        "required": ["categoria", "borrador_respuesta"],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
+_REQUIRED_MAIL_KEYS = set(MAIL_JSON_SCHEMA["schema"]["required"])
+_VALID_CATEGORIAS_MAIL = set(MAIL_JSON_SCHEMA["schema"]["properties"]["categoria"]["enum"])
+
+
+def _mail_system_prompt(casilla: str) -> str:
+    intro = MAIL_SYSTEM_PROMPT_POR_CASILLA.get(casilla, MAIL_SYSTEM_PROMPT_POR_CASILLA["consultorio"])
+    return intro + """ Nunca mandás nada vos -- Nicolás revisa y aprueba cada borrador antes de \
+que salga.
+
+Clasificá el mail en una de estas categorías:
+- turno: pide sacar, cambiar o cancelar un turno.
+- administrativo: pregunta administrativa (horarios, dirección, obra social, precio, información general).
+- medico: menciona síntomas, medicación, diagnóstico, receta, o cualquier otra cosa clínica.
+- queja: reclamo o disconformidad.
+- spam: publicidad, phishing, o cualquier cosa que no es un mail real dirigido a esta casilla.
+- otro: no encaja en ninguna de las anteriores.
+
+Reglas del borrador (`borrador_respuesta`), no negociables:
+1. NUNCA inventes ni ofrezcas un horario específico disponible -- no tenés acceso a la agenda real. \
+Si pide turno, el borrador dice que alguien va a confirmar el horario, nunca propone uno.
+2. NUNCA respondas nada clínico (no interpretes síntomas, no confirmes ni sugieras medicación). Si la \
+categoría es "medico", el borrador solo avisa que el Dr. Buso va a revisar el pedido personalmente.
+3. NUNCA afirmes un precio ni si una obra social/prepaga está cubierta -- no tenés esa información \
+real. Si preguntan, el borrador dice que alguien va a confirmar ese dato puntual.
+4. Si es "spam", el borrador es un string vacío -- no hace falta redactar nada, nadie va a mandar \
+respuesta a spam.
+5. Tono cordial, breve, en español rioplatense."""
+
+
+def _validate_mail_shape(data):
+    if not isinstance(data, dict):
+        return f"la respuesta no es un objeto JSON (vino {type(data).__name__})"
+    missing = _REQUIRED_MAIL_KEYS - set(data.keys())
+    if missing:
+        return f"faltan campos requeridos: {', '.join(sorted(missing))}"
+    if data.get("categoria") not in _VALID_CATEGORIAS_MAIL:
+        return f"'categoria' fuera del rango esperado: {data.get('categoria')!r}"
+    if not isinstance(data.get("borrador_respuesta"), str):
+        return "'borrador_respuesta' no es texto"
+    return None
+
+
+def _try_clasificar_mail(provider_name: str, casilla: str, texto: str) -> dict:
+    system_prompt = _mail_system_prompt(casilla)
+    if provider_name == "openai":
+        client = _get_openai_client()
+        if client is None:
+            return {"status": "auth_error", "provider": "openai", "error": _openai_error}
+        try:
+            resp = client.chat.completions.create(
+                model=os.getenv("OPENAI_MODEL", "gpt-5"),
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": texto},
+                ],
+                response_format={"type": "json_schema", "json_schema": MAIL_JSON_SCHEMA},
+            )
+            raw_content = resp.choices[0].message.content
+            try:
+                data = json.loads(raw_content)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"status": "malformed", "provider": "openai", "error": f"JSON inválido: {e}"}
+        except Exception as e:
+            status = "auth_error" if _classify_exception(e) == "auth" else "transient_error"
+            return {"status": status, "provider": "openai", "error": f"{type(e).__name__}: {e}"}
+    else:
+        client = _get_claude_client()
+        if client is None:
+            return {"status": "auth_error", "provider": "claude", "error": _claude_error}
+        try:
+            resp = client.messages.create(
+                model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5"),
+                max_tokens=500,
+                system=system_prompt,
+                tools=[{
+                    "name": "clasificacion_mail",
+                    "description": "Clasificación y borrador de respuesta para un mail entrante.",
+                    "input_schema": MAIL_JSON_SCHEMA["schema"],
+                }],
+                tool_choice={"type": "tool", "name": "clasificacion_mail"},
+                messages=[{"role": "user", "content": texto}],
+            )
+            tool_block = next((b for b in resp.content if b.type == "tool_use"), None)
+            if tool_block is None:
+                return {"status": "malformed", "provider": "claude", "error": "la respuesta no incluyó el tool_use esperado"}
+            data = tool_block.input
+        except Exception as e:
+            status = "auth_error" if _classify_exception(e) == "auth" else "transient_error"
+            return {"status": status, "provider": "claude", "error": f"{type(e).__name__}: {e}"}
+
+    shape_error = _validate_mail_shape(data)
+    if shape_error:
+        return {"status": "malformed", "provider": provider_name, "error": shape_error}
+    return {"status": "success", "provider": provider_name, "data": data}
+
+
+def clasificar_y_redactar_mail(casilla: str, asunto: str, cuerpo: str, provider: str = None) -> dict:
+    """Mismo contrato de salida que clasificar_y_redactar_mensaje(). `texto`
+    para la IA es asunto+cuerpo juntos -- el asunto suele traer la intención
+    más clara ("Turno", "Consulta por...")."""
+    texto = f"Asunto: {asunto}\n\n{cuerpo}"
+    provider = provider or get_provider_for("clasificar_mail", default="claude")
+    alternate = "claude" if provider == "openai" else "openai"
+
+    attempts = []
+    first = _try_clasificar_mail(provider, casilla, texto)
+    attempts.append(first)
+
+    if first["status"] == "success":
+        return {"outcome": "success", "data": first["data"], "provider": provider, "attempts": attempts}
+
+    if first["status"] == "auth_error":
+        return {"outcome": "auth_error", "provider": provider, "error": first["error"], "attempts": attempts}
+
+    if not get_provider_matrix().get("fallback_on_primary_failure", True):
+        return {"outcome": "both_failed", "error": first["error"], "attempts": attempts}
+
+    second = _try_clasificar_mail(alternate, casilla, texto)
+    attempts.append(second)
+
+    if second["status"] == "success":
+        return {
+            "outcome": "success", "data": second["data"], "provider": alternate,
+            "fell_back_from": provider, "attempts": attempts,
+        }
+
+    combined_error = f"{provider}: {first['error']} | {alternate}: {second['error']}"
+    return {"outcome": "both_failed", "error": combined_error, "attempts": attempts}
+
+
 # v0.2.6 -- extracción de pedidos de factura para el bot de facturación ARCA
 # (ver CFO y Decisiones Estrategicas/Proyecto_Facturacion_WhatsApp_ARCA.md).
 # Mismo patrón de resiliencia que extract()/clasificar_y_redactar_mensaje().

@@ -38,6 +38,8 @@ import centro_mando_adapter
 import clinical_guard
 import db
 import facturas
+import gmail_client
+import mail_entrante
 import mensajes_whatsapp
 import pairing
 import recordatorios
@@ -335,6 +337,20 @@ class Handler(BaseHTTPRequestHandler):
                     qs = parse_qs(parsed.query)
                 estado = qs.get("estado", [None])[0]
                 self._send_json(200, {"ok": True, "facturas": facturas.list_facturas(estado)})
+            elif path == "/api/v1/mail":
+                # Director-only también para LEER -- a diferencia de WhatsApp,
+                # acá Marianela nunca entró en el diseño (ver entrevista v0.2.6)
+                # y no hay vista Operativa para esto.
+                auth = self._require_role(self._authenticate(), {"director"})
+                if auth is None:
+                    return
+                qs = {}
+                if parsed.query:
+                    from urllib.parse import parse_qs
+                    qs = parse_qs(parsed.query)
+                casilla = qs.get("casilla", [None])[0]
+                estado = qs.get("estado", [None])[0]
+                self._send_json(200, {"ok": True, "mail": mail_entrante.list_mails(casilla, estado)})
             elif path.startswith("/facturas/") and path.endswith("/pdf"):
                 # Ruta PÚBLICA (como /whatsapp/inbound) -- Twilio tiene que poder
                 # descargar el PDF sin autenticarse para adjuntarlo al WhatsApp.
@@ -350,6 +366,8 @@ class Handler(BaseHTTPRequestHandler):
         except mensajes_whatsapp.MensajeWhatsappError as e:
             self._send_json(400, {"ok": False, "error": str(e)})
         except facturas.FacturaError as e:
+            self._send_json(400, {"ok": False, "error": str(e)})
+        except mail_entrante.MailEntranteError as e:
             self._send_json(400, {"ok": False, "error": str(e)})
         except Exception as e:
             # v0.2.5 -- Impeccable P2: antes esto mandaba str(e) tal cual a la
@@ -642,6 +660,30 @@ class Handler(BaseHTTPRequestHandler):
                 except facturas.RequiereDirector as e:
                     self._send_json(403, {"ok": False, "error": str(e)})
 
+            elif path.startswith("/api/v1/mail/") and path.endswith("/aprobar"):
+                # Director-only, SIN excepción -- ver nota en mail_entrante.py.
+                auth = self._require_role(self._authenticate(), {"director"})
+                if auth is None:
+                    return
+                mail_id = path.split("/")[4]
+                texto_final = body.get("texto_final") or None
+                try:
+                    result = mail_entrante.aprobar_y_enviar(mail_id, auth["user_id"], auth["role"], texto_final)
+                    self._send_json(200, result)
+                except mail_entrante.RequiereDirector as e:
+                    self._send_json(403, {"ok": False, "error": str(e)})
+
+            elif path.startswith("/api/v1/mail/") and path.endswith("/rechazar"):
+                auth = self._require_role(self._authenticate(), {"director"})
+                if auth is None:
+                    return
+                mail_id = path.split("/")[4]
+                try:
+                    result = mail_entrante.rechazar(mail_id, auth["user_id"], auth["role"])
+                    self._send_json(200, result)
+                except mail_entrante.RequiereDirector as e:
+                    self._send_json(403, {"ok": False, "error": str(e)})
+
             else:
                 self._send_json(404, {"ok": False, "error": "ruta no encontrada"})
         except json.JSONDecodeError:
@@ -653,6 +695,8 @@ class Handler(BaseHTTPRequestHandler):
         except mensajes_whatsapp.MensajeWhatsappError as e:
             self._send_json(400, {"ok": False, "error": str(e)})
         except facturas.FacturaError as e:
+            self._send_json(400, {"ok": False, "error": str(e)})
+        except mail_entrante.MailEntranteError as e:
             self._send_json(400, {"ok": False, "error": str(e)})
         except (twilio_client.TwilioConfigError, twilio_client.TwilioSendError) as e:
             self._send_json(502, {"ok": False, "error": str(e)})

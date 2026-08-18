@@ -10,3 +10,11 @@ PyYAML>=6.0
 segno>=1.6.0
 fpdf2>=2.7.0
 requests>=2.31.0
+
+# mail_entrante.py (módulo de mail, v0.2.6) -- Gmail API vía OAuth "Desktop
+# app" + refresh token (ver comentario de setup en gmail_client.py). Ya
+# estaban instaladas en el venv como resto del viejo sheets_client.py
+# (cuenta de servicio, no aplica acá), pero nunca se habían declarado.
+google-api-python-client>=2.100.0
+google-auth>=2.23.0
+google-auth-oauthlib>=1.4.0

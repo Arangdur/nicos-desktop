@@ -89,6 +89,26 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
       <input type="text" id="drapp-team" value="${current.DRAPP_TEAM_ID || ''}" placeholder="clinica-norte">
     </div>
 
+    <div class="card">
+      <h3>Mail entrante — Gmail (consultorio y Fundación Abate)</h3>
+      <p class="help-text">
+        Para que NicOS lea y conteste (con tu aprobación) los mails de novogen.salud@gmail.com
+        y fundacion.abate@gmail.com. El Client ID/Secret se generan UNA sola vez en Google Cloud
+        Console (credenciales OAuth tipo "Desktop app") y sirven para las dos casillas. Cada
+        refresh token se obtiene corriendo <code>python3 sidecar/gmail_oauth_setup.py &lt;casilla&gt;</code>
+        vos mismo, una vez por casilla (necesita tu login real en el navegador) — ver el
+        comentario de setup en sidecar/gmail_client.py para los pasos completos.
+      </p>
+      <label>Client ID</label>
+      <input type="text" id="gmail-client-id" value="${current.GMAIL_CLIENT_ID || ''}" placeholder="xxxx.apps.googleusercontent.com">
+      <label>Client Secret ${current.GMAIL_CLIENT_SECRET_configurado ? '— ya configurado ✓' : '— falta configurar'}</label>
+      <input type="password" id="gmail-client-secret" placeholder="••••••••••••••••">
+      <label>Refresh token — consultorio (novogen.salud@gmail.com) ${current.GMAIL_REFRESH_TOKEN_CONSULTORIO_configurado ? '— ya configurado ✓' : '— falta configurar'}</label>
+      <input type="password" id="gmail-refresh-consultorio" placeholder="••••••••••••••••">
+      <label>Refresh token — Fundación Abate (fundacion.abate@gmail.com) ${current.GMAIL_REFRESH_TOKEN_ABATE_configurado ? '— ya configurado ✓' : '— falta configurar'}</label>
+      <input type="password" id="gmail-refresh-abate" placeholder="••••••••••••••••">
+    </div>
+
     <div class="row" style="margin-bottom:var(--space-4);">
       <button class="primary" id="btn-save-settings">Guardar</button>
       <span id="settings-status" style="font-size:var(--text-sm);"></span>
@@ -144,15 +164,22 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
       DRAPP_TEAM_ID: containerEl.querySelector('#drapp-team').value.trim(),
       TWILIO_WEBHOOK_BASE_URL: containerEl.querySelector('#twilio-webhook-base').value.trim().replace(/\/$/, ''),
       FACTURACION_TELEFONOS_AUTORIZADOS: containerEl.querySelector('#facturacion-telefonos').value.trim(),
+      GMAIL_CLIENT_ID: containerEl.querySelector('#gmail-client-id').value.trim(),
     };
     const anthropicKey = containerEl.querySelector('#anthropic-key').value.trim();
     const openaiKey = containerEl.querySelector('#openai-key').value.trim();
     const twilioToken = containerEl.querySelector('#twilio-token').value.trim();
     const drappKey = containerEl.querySelector('#drapp-key').value.trim();
+    const gmailClientSecret = containerEl.querySelector('#gmail-client-secret').value.trim();
+    const gmailRefreshConsultorio = containerEl.querySelector('#gmail-refresh-consultorio').value.trim();
+    const gmailRefreshAbate = containerEl.querySelector('#gmail-refresh-abate').value.trim();
     if (anthropicKey) update.ANTHROPIC_API_KEY = anthropicKey;
     if (openaiKey) update.OPENAI_API_KEY = openaiKey;
     if (drappKey) update.DRAPP_API_KEY = drappKey;
     if (twilioToken) update.TWILIO_AUTH_TOKEN = twilioToken;
+    if (gmailClientSecret) update.GMAIL_CLIENT_SECRET = gmailClientSecret;
+    if (gmailRefreshConsultorio) update.GMAIL_REFRESH_TOKEN_CONSULTORIO = gmailRefreshConsultorio;
+    if (gmailRefreshAbate) update.GMAIL_REFRESH_TOKEN_ABATE = gmailRefreshAbate;
 
     try {
       const result = await window.nicos.saveSettings(update);

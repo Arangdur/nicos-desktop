@@ -57,6 +57,7 @@ document.querySelectorAll('[data-tab]').forEach((btn) => {
     if (btn.dataset.tab === 'recordatorios') loadRecordatoriosTab();
     if (btn.dataset.tab === 'mensajes-whatsapp') loadMensajesWhatsappTab();
     if (btn.dataset.tab === 'facturas') loadFacturasTab();
+    if (btn.dataset.tab === 'mail') loadMailTab();
     if (btn.dataset.tab === 'ajustes') loadAjustes();
     if (btn.dataset.tab === 'acerca-de') loadAcercaDe();
   });
@@ -129,12 +130,13 @@ function loadAcercaDe() {
 // usan sus pestañas -- no hay lógica nueva del lado del servidor, solo se
 // reusa y se resume acá.
 async function _cargarConteosAtencion() {
-  const [tareas, mensajes, recordatorios, abate, facturas] = await Promise.all([
+  const [tareas, mensajes, recordatorios, abate, facturas, mail] = await Promise.all([
     fetchJson('/api/v1/tasks?state=pending_approval').catch(() => null),
     fetchJson('/api/v1/whatsapp/mensajes').catch(() => null),
     fetchJson('/api/v1/recordatorios').catch(() => null),
     _cargarConteosAbate(),
     fetchJson('/api/v1/facturas').catch(() => null),
+    fetchJson('/api/v1/mail').catch(() => null),
   ]);
   return {
     tareas: tareas && tareas.ok ? tareas.tasks.length : 0,
@@ -149,6 +151,10 @@ async function _cargarConteosAtencion() {
     facturas: facturas && facturas.ok
       ? facturas.facturas.filter((f) => f.estado === 'borrador_generado' || f.estado === 'error_extraccion').length
       : 0,
+    // spam no necesita atención del Director -- ver mail-tab.js.
+    mail: mail && mail.ok
+      ? mail.mail.filter((m) => (m.estado === 'borrador_generado' || m.estado === 'error_clasificacion') && m.categoria !== 'spam').length
+      : 0,
   };
 }
 
@@ -157,6 +163,7 @@ function _renderAtencionHtml(counts) {
     { n: counts.tareas, label: counts.tareas === 1 ? 'tarea esperando tu aprobación' : 'tareas esperando tu aprobación', tab: 'tareas' },
     { n: counts.whatsapp, label: counts.whatsapp === 1 ? 'mensaje de WhatsApp con borrador esperando' : 'mensajes de WhatsApp con borrador esperando', tab: 'mensajes-whatsapp' },
     { n: counts.facturas, label: counts.facturas === 1 ? 'pedido de factura esperando aprobación' : 'pedidos de factura esperando aprobación', tab: 'facturas' },
+    { n: counts.mail || 0, label: counts.mail === 1 ? 'mail con borrador esperando' : 'mails con borrador esperando', tab: 'mail' },
     { n: counts.turnos, label: counts.turnos === 1 ? 'turno necesita atención (sin teléfono o falló el envío)' : 'turnos necesitan atención (sin teléfono o falló el envío)', tab: 'recordatorios' },
     { n: counts.medicacionAtrasada || 0, label: counts.medicacionAtrasada === 1 ? 'toma de Abate atrasada sin confirmar' : 'tomas de Abate atrasadas sin confirmar', tab: 'abate' },
     { n: counts.novedadesNuevas || 0, label: counts.novedadesNuevas === 1 ? 'novedad nueva de Abate' : 'novedades nuevas de Abate', tab: 'abate' },
@@ -436,6 +443,7 @@ async function init() {
   initRecordatoriosTab(API);
   initMensajesWhatsappTab(API, 'director');
   initFacturasTab(API);
+  initMailTab(API, 'director');
   await loadResumen();
   await loadTasksTab();
   loadChat();

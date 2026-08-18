@@ -28,6 +28,8 @@ import centro_mando_adapter
 import db
 import drapp_client
 import facturas
+import gmail_client
+import mail_entrante
 import mensajes_whatsapp
 import recordatorios
 import tasks
@@ -64,6 +66,15 @@ _ultimo_chequeo_mensajes_whatsapp = None
 # manual vía /api/v1/facturas/<id>/aprobar, Director-only (ver facturas.py).
 FACTURAS_CHECK_INTERVAL_SECONDS = 15
 _ultimo_chequeo_facturas = None
+
+# Mail entrante (consultorio + Abate) -- a diferencia de WhatsApp, un mail no
+# tiene la misma urgencia implícita (nadie espera respuesta en minutos), así
+# que alcanza con un intervalo más relajado tanto para traer mail nuevo de
+# Gmail como para generarle el borrador.
+MAIL_SYNC_INTERVAL_SECONDS = 120
+_ultimo_sync_mail = None
+MAIL_CHECK_INTERVAL_SECONDS = 60
+_ultimo_chequeo_mail = None
 
 # v0.2.1-rc6: respaldo estructural ADEMÁS del arreglo de la máquina de estados
 # (ver tasks.py) -- ninguna tarea puede pasar por _process_classification()
@@ -528,6 +539,46 @@ def _procesar_mensajes_whatsapp_si_corresponde():
             sys.stderr.write(f"[worker] ERROR generando borrador para mensaje {m['id']}: {e}\n")
 
 
+def _sincronizar_mail_si_corresponde():
+    """No-op por casilla si sus credenciales de Gmail no están configuradas
+    (ver gmail_client._config) -- así se puede activar una casilla sin
+    esperar tener la otra lista."""
+    global _ultimo_sync_mail
+    ahora = datetime.datetime.now()
+    if _ultimo_sync_mail is not None:
+        transcurrido = (ahora - _ultimo_sync_mail).total_seconds()
+        if transcurrido < MAIL_SYNC_INTERVAL_SECONDS:
+            return
+    _ultimo_sync_mail = ahora
+
+    for casilla in mail_entrante.CASILLAS_VALIDAS:
+        try:
+            mail_entrante.sincronizar_casilla(casilla)
+        except gmail_client.GmailConfigError:
+            continue  # casilla todavía sin credenciales cargadas, no es un error
+        except gmail_client.GmailSendError as e:
+            sys.stderr.write(f"[worker] ERROR sincronizando mail de '{casilla}': {e}\n")
+
+
+def _procesar_mail_si_corresponde():
+    """Mismo criterio que _procesar_mensajes_whatsapp_si_corresponde: un
+    único intento de IA por tick, nunca reintenta solo si falla (queda en
+    'error_clasificacion')."""
+    global _ultimo_chequeo_mail
+    ahora = datetime.datetime.now()
+    if _ultimo_chequeo_mail is not None:
+        transcurrido = (ahora - _ultimo_chequeo_mail).total_seconds()
+        if transcurrido < MAIL_CHECK_INTERVAL_SECONDS:
+            return
+    _ultimo_chequeo_mail = ahora
+
+    for m in mail_entrante.mails_pendientes_de_borrador():
+        try:
+            mail_entrante.generar_borrador(m["id"])
+        except mail_entrante.MailEntranteError as e:
+            sys.stderr.write(f"[worker] ERROR generando borrador de mail {m['id']}: {e}\n")
+
+
 def _procesar_facturas_si_corresponde():
     """Mismo criterio que _procesar_mensajes_whatsapp_si_corresponde: un
     único intento de IA por tick, nunca reintenta solo si falla (queda en
@@ -556,6 +607,8 @@ def run_forever():
         _sincronizar_drapp_si_corresponde()
         _procesar_mensajes_whatsapp_si_corresponde()
         _procesar_facturas_si_corresponde()
+        _sincronizar_mail_si_corresponde()
+        _procesar_mail_si_corresponde()
         task = _claim_next_task()
         if task is None:
             time.sleep(POLL_INTERVAL_SECONDS)
