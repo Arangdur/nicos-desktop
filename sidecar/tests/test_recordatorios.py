@@ -3,7 +3,9 @@ Recordatorio de turnos de Medicina General por WhatsApp -- prueba con
 evidencia real (requests HTTP contra servidores con is_lan=True/False y
 tokens de verdad) que:
 
-1. Importar turnos es Director-only (bloqueado a nivel de servidor).
+1. Importar turnos y completar un teléfono es Director + Operativa (v0.2.6
+   -- antes Director-only y ni siquiera accesible por red) -- Enfermero
+   recibe 403.
 2. Ver la lista es Director + Operativa -- Enfermero recibe 403.
 3. Un turno sin teléfono entra directo en estado 'sin_telefono', nunca se
    asume ni se inventa un número.
@@ -81,6 +83,17 @@ def _turno(**overrides):
 class TestRecordatoriosHTTP(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # Otras clases de este archivo (ej. TestCompletarTelefono) usan su
+        # propia base temporal y hacen importlib.reload(db) apuntando ahí --
+        # unittest no garantiza el orden de ejecución de las clases (es
+        # alfabético, no el de definición), así que esta clase se para de
+        # nuevo sobre _TMP_DB acá mismo en vez de asumir que nadie tocó el
+        # estado global antes (mismo criterio que test_mensajes_whatsapp.py).
+        os.environ["NICOS_DB_PATH"] = _TMP_DB.name
+        import importlib
+        importlib.reload(db)
+        db.run_migrations()
+
         cls.local_httpd = _make_server(is_lan=False)   # simula al Director en su propia Mac
         cls.lan_httpd = _make_server(is_lan=True)       # simula la red de Tailscale
 
@@ -112,19 +125,47 @@ class TestRecordatoriosHTTP(unittest.TestCase):
     def _as(self, identity, method, path, body=None):
         return self._request_static(self.lan_httpd, method, path, body, token=identity["token"])
 
-    # 1. Director-only para importar --------------------------------------
+    # 1. Director + Operativa pueden importar y completar teléfono ----------
 
     def test_director_importa_turno_ok(self):
         status, data = self._local("POST", "/api/v1/recordatorios/importar", {"turnos": [_turno()]})
         self.assertEqual(status, 200, data)
         self.assertEqual(data["importados"], 1)
 
-    def test_operativa_no_puede_importar_por_red(self):
+    def test_operativa_puede_importar_por_red(self):
         status, data = self._as(self.operativa, "POST", "/api/v1/recordatorios/importar", {"turnos": [_turno()]})
-        self.assertEqual(status, 403)
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["importados"], 1)
 
     def test_enfermero_no_puede_importar_por_red(self):
         status, data = self._as(self.enfermero, "POST", "/api/v1/recordatorios/importar", {"turnos": [_turno()]})
+        self.assertEqual(status, 403)
+
+    def test_operativa_puede_completar_telefono(self):
+        status, data = self._as(
+            self.operativa, "POST", "/api/v1/recordatorios/importar",
+            {"turnos": [_turno(paciente_nombre="Para Completar, Caso", telefono=None)]},
+        )
+        recordatorio_id = data["ids"][0]
+        status, data = self._as(
+            self.operativa, "POST", f"/api/v1/recordatorios/{recordatorio_id}/telefono",
+            {"telefono": "+5493584390000"},
+        )
+        self.assertEqual(status, 200, data)
+        fila = [r for r in recordatorios.list_recordatorios() if r["id"] == recordatorio_id][0]
+        self.assertEqual(fila["estado"], "pendiente")
+        self.assertEqual(fila["telefono"], "+5493584390000")
+
+    def test_enfermero_no_puede_completar_telefono(self):
+        status, data = self._local(
+            "POST", "/api/v1/recordatorios/importar",
+            {"turnos": [_turno(paciente_nombre="Otro Sin Telefono", telefono=None)]},
+        )
+        recordatorio_id = data["ids"][0]
+        status, data = self._as(
+            self.enfermero, "POST", f"/api/v1/recordatorios/{recordatorio_id}/telefono",
+            {"telefono": "+5493584390000"},
+        )
         self.assertEqual(status, 403)
 
     # 2. Director + Operativa pueden leer, Enfermero no ---------------------
@@ -156,6 +197,47 @@ class TestRecordatoriosHTTP(unittest.TestCase):
             {"turnos": [{"paciente_nombre": "Falta Fecha", "hora_turno": "10:00"}]},
         )
         self.assertEqual(status, 400)
+
+
+class TestCompletarTelefono(unittest.TestCase):
+    """No necesita servidor HTTP -- prueba directo las validaciones de
+    completar_telefono(), con base de datos temporal propia."""
+
+    def setUp(self):
+        self.db_file = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.db_file.close()
+        os.environ["NICOS_DB_PATH"] = self.db_file.name
+        import importlib
+        importlib.reload(db)
+        db.run_migrations()
+
+    def tearDown(self):
+        os.unlink(self.db_file.name)
+
+    def test_completa_un_turno_sin_telefono(self):
+        recordatorio_id = recordatorios.importar_turnos(
+            [_turno(telefono=None)], created_by="nicolas",
+        )["ids"][0]
+        recordatorios.completar_telefono(recordatorio_id, "+5493584390000")
+        fila = [r for r in recordatorios.list_recordatorios() if r["id"] == recordatorio_id][0]
+        self.assertEqual(fila["estado"], "pendiente")
+        self.assertEqual(fila["telefono"], "+5493584390000")
+
+    def test_no_completa_un_turno_que_ya_tenia_telefono(self):
+        recordatorio_id = recordatorios.importar_turnos([_turno()], created_by="nicolas")["ids"][0]
+        with self.assertRaises(recordatorios.RecordatorioError):
+            recordatorios.completar_telefono(recordatorio_id, "+5493584390000")
+
+    def test_telefono_vacio_es_rechazado(self):
+        recordatorio_id = recordatorios.importar_turnos(
+            [_turno(telefono=None)], created_by="nicolas",
+        )["ids"][0]
+        with self.assertRaises(recordatorios.RecordatorioError):
+            recordatorios.completar_telefono(recordatorio_id, "  ")
+
+    def test_turno_inexistente_es_rechazado(self):
+        with self.assertRaises(recordatorios.RecordatorioError):
+            recordatorios.completar_telefono("no-existe", "+5493584390000")
 
 
 class TestVentanaDeEnvio(unittest.TestCase):

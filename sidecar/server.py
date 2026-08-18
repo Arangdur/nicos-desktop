@@ -599,14 +599,23 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True, **result})
 
             elif path == "/api/v1/recordatorios/importar":
-                # Director-only, bloqueado a nivel de servidor igual que el
-                # resto de las rutas admin -- la carga de turnos es manual
-                # por ahora (ver recordatorios.py), no accesible desde la LAN.
-                if self._is_lan():
-                    self._send_json(403, {"ok": False, "error": "solo disponible localmente"})
+                # v0.2.6 -- Director + Operativa (antes Director-only y ni
+                # siquiera accesible desde la LAN/Tailscale): carga de
+                # agenda, no es un acto clínico, Marianela la puede resolver
+                # sola -- ver recordatorios.py.
+                auth = self._require_role(self._authenticate(), {"director", "operativa"})
+                if auth is None:
                     return
-                result = recordatorios.importar_turnos(body.get("turnos", []), created_by="nicolas")
+                result = recordatorios.importar_turnos(body.get("turnos", []), created_by=auth["user_id"])
                 self._send_json(200, {"ok": True, **result})
+
+            elif path.startswith("/api/v1/recordatorios/") and path.endswith("/telefono"):
+                auth = self._require_role(self._authenticate(), {"director", "operativa"})
+                if auth is None:
+                    return
+                recordatorio_id = path.split("/")[4]
+                result = recordatorios.completar_telefono(recordatorio_id, body.get("telefono", ""))
+                self._send_json(200, result)
 
             elif path.startswith("/api/v1/whatsapp/mensajes/") and path.endswith("/aprobar"):
                 auth = self._require_role(self._authenticate(), {"director", "operativa"})

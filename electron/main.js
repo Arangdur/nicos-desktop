@@ -294,6 +294,9 @@ ipcMain.handle('nicos:operativa-list-tasks', () => operativaClient.listTasks());
 ipcMain.handle('nicos:operativa-flush-outbox', () => operativaClient.flushOutbox());
 ipcMain.handle('nicos:operativa-outbox-count', () => operativaClient.getOutboxCount());
 ipcMain.handle('nicos:recordatorios-list', () => operativaClient.listRecordatorios());
+ipcMain.handle('nicos:recordatorios-importar', (_event, turnos) => operativaClient.recordatoriosImportar(turnos));
+ipcMain.handle('nicos:recordatorios-completar-telefono', (_event, { recordatorioId, telefono }) =>
+  operativaClient.recordatoriosCompletarTelefono(recordatorioId, telefono));
 ipcMain.handle('nicos:whatsapp-mensajes-list', () => operativaClient.whatsappMensajesList());
 ipcMain.handle('nicos:whatsapp-mensaje-aprobar', (_event, { mensajeId, textoFinal }) =>
   operativaClient.whatsappMensajeAprobar(mensajeId, textoFinal));

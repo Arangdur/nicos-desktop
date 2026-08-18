@@ -28,6 +28,9 @@ contextBridge.exposeInMainWorld('nicos', {
   operativaFlushOutbox: () => ipcRenderer.invoke('nicos:operativa-flush-outbox'),
   operativaOutboxCount: () => ipcRenderer.invoke('nicos:operativa-outbox-count'),
   recordatoriosList: () => ipcRenderer.invoke('nicos:recordatorios-list'),
+  recordatoriosImportar: (turnos) => ipcRenderer.invoke('nicos:recordatorios-importar', turnos),
+  recordatoriosCompletarTelefono: (recordatorioId, telefono) =>
+    ipcRenderer.invoke('nicos:recordatorios-completar-telefono', { recordatorioId, telefono }),
   whatsappMensajesList: () => ipcRenderer.invoke('nicos:whatsapp-mensajes-list'),
   whatsappMensajeAprobar: (mensajeId, textoFinal) =>
     ipcRenderer.invoke('nicos:whatsapp-mensaje-aprobar', { mensajeId, textoFinal }),

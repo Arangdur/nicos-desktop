@@ -12,9 +12,12 @@ datos deliberadamente reemplazable el día que Cormos confirme el acceso
 real a su API (ver memoria del bot de WhatsApp).
 
 Permisos (aplicados acá Y en server.py, defensa en profundidad):
-- Importar turnos: Director-only.
-- Ver la lista: Director + Operativa -- Marianela necesita ver qué falta
-  resolver a mano (sin_telefono, o turnos liberados por cancelación).
+- Importar turnos, completar un teléfono que faltaba: Director + Operativa
+  -- carga administrativa de agenda, no clínica, Marianela la puede resolver
+  sola (v0.2.6, antes era Director-only -- ver feedback real de uso: el
+  calendario/recordatorios de Operativa eran de solo lectura y sin datos
+  cargados, no le servían de nada).
+- Ver la lista: Director + Operativa.
 """
 import datetime
 
@@ -174,6 +177,29 @@ def sincronizar_desde_drapp(turnos_drapp: list, sincronizado_by: str = "sistema"
         # si ya está 'enviado' o 'fallo_envio', no se toca -- ya se resolvió.
     conn.commit()
     return {"importados": importados, "actualizados": actualizados}
+
+
+def completar_telefono(recordatorio_id: str, telefono: str):
+    """Para un turno que quedó 'sin_telefono' -- Marianela (o el Director)
+    lo consigue después y lo completa acá, sin tener que recargar el turno
+    entero de nuevo. Solo tiene sentido desde 'sin_telefono': si ya está
+    'pendiente'/'enviado'/'fallo_envio' hay otra vía para corregirlo (o ya
+    se resolvió), no se pisa un teléfono que ya se usó para mandar algo."""
+    telefono = (telefono or "").strip()
+    if not telefono:
+        raise RecordatorioError("Falta el teléfono.")
+    conn = db.get_connection()
+    row = conn.execute("SELECT estado FROM recordatorios_turnos WHERE id = ?", (recordatorio_id,)).fetchone()
+    if row is None:
+        raise RecordatorioError(f"Turno no encontrado: {recordatorio_id}")
+    if row["estado"] != "sin_telefono":
+        raise RecordatorioError(f"Este turno no está esperando un teléfono (estado actual: {row['estado']}).")
+    conn.execute(
+        "UPDATE recordatorios_turnos SET telefono = ?, estado = 'pendiente' WHERE id = ?",
+        (telefono, recordatorio_id),
+    )
+    conn.commit()
+    return {"ok": True}
 
 
 def marcar_resultado(recordatorio_id: str, estado: str, enviado_at: str = None):

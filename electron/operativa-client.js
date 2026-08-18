@@ -206,10 +206,24 @@ async function listTasks() {
   return _authedFetch('/api/v1/tasks');
 }
 
-// ---- Recordatorios de turno (Director + Operativa leen, solo Director carga) --
+// ---- Recordatorios de turno (Director + Operativa, ambos leen y cargan) --
 
 async function listRecordatorios() {
   return _authedFetch('/api/v1/recordatorios');
+}
+
+async function recordatoriosImportar(turnos) {
+  return _authedFetch('/api/v1/recordatorios/importar', {
+    method: 'POST',
+    body: JSON.stringify({ turnos }),
+  });
+}
+
+async function recordatoriosCompletarTelefono(recordatorioId, telefono) {
+  return _authedFetch(`/api/v1/recordatorios/${recordatorioId}/telefono`, {
+    method: 'POST',
+    body: JSON.stringify({ telefono }),
+  });
 }
 
 function getOutboxCount() {
@@ -272,6 +286,6 @@ module.exports = {
   submitTask, flushOutbox, listTasks, getOutboxCount,
   abateListResidentes, abateGetTratamiento, abateListAdministracionesHoy,
   abateRegistrarAdministracion, abateListNovedades, abateCreateNovedad,
-  listRecordatorios,
+  listRecordatorios, recordatoriosImportar, recordatoriosCompletarTelefono,
   whatsappMensajesList, whatsappMensajeAprobar, whatsappMensajeRechazar,
 };

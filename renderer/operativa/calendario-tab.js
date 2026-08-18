@@ -1,9 +1,9 @@
 // Pestaña "Calendario" (vista Operativa) — v0.2.5. Vista mensual de los
 // turnos de Medicina General que ya conoce NicOS (recordatorios_turnos:
 // cargados a mano o sincronizados desde DrApp) -- Psiquiatría no aparece acá
-// a propósito, DrApp ya la cubre con su propia agenda. Es de SOLO LECTURA,
-// mismo criterio que la pestaña Recordatorios: Marianela ve, el Director (o
-// la sync de DrApp) es quien carga.
+// a propósito, DrApp ya la cubre con su propia agenda. Esta vista en sí es
+// de SOLO LECTURA (para cargar o completar un turno, ver la pestaña
+// Recordatorios, que desde v0.2.6 sí lo permite -- Director y Operativa).
 //
 // No pega a ninguna ruta nueva del backend -- reusa window.nicos.recordatoriosList()
 // (la misma que ya usa recordatorios-avisos.js) y agrupa por fecha acá en el
