@@ -137,9 +137,21 @@ class TestDisponibilidadYTurnos(unittest.TestCase):
     @patch("drapp_client.urllib.request.urlopen")
     def test_list_turnos_medicina_general_excluye_psiquiatria(self, mock_urlopen):
         mock_urlopen.return_value = _fake_response([
-            {"id": "events/1", "service": {"label": "Medicina General"}, "day": "2026-08-01", "time": "10:00"},
-            {"id": "events/2", "service": {"label": "Consulta Psiquiatría"}, "day": "2026-08-01", "time": "15:30"},
-            {"id": "events/3", "service": {"label": "Psiquiatría / Consulta"}, "day": "2026-08-02", "time": "08:00"},
+            {"id": "events/1", "type": "appointment", "service": {"label": "Medicina General"}, "day": "2026-08-01", "time": "10:00"},
+            {"id": "events/2", "type": "appointment", "service": {"label": "Consulta Psiquiatría"}, "day": "2026-08-01", "time": "15:30"},
+            {"id": "events/3", "type": "appointment", "service": {"label": "Psiquiatría / Consulta"}, "day": "2026-08-02", "time": "08:00"},
+        ])
+        turnos = drapp_client.list_turnos_medicina_general("2026-08-01", "2026-08-07")
+        self.assertEqual(len(turnos), 1)
+        self.assertEqual(turnos[0]["id"], "events/1")
+
+    @patch("drapp_client.urllib.request.urlopen")
+    def test_list_turnos_medicina_general_excluye_bloqueos_de_agenda(self, mock_urlopen):
+        # v0.2.6 -- confirmado en vivo: /events con status=booked también trae
+        # entradas type="lock" (feriados/bloqueos, sin paciente) -- no son turnos.
+        mock_urlopen.return_value = _fake_response([
+            {"id": "events/1", "type": "appointment", "service": {"label": "Medicina General"}, "day": "2026-08-01", "time": "10:00"},
+            {"id": "events/lock-1", "type": "lock", "service": {}, "day": "2026-08-01", "time": "00:00"},
         ])
         turnos = drapp_client.list_turnos_medicina_general("2026-08-01", "2026-08-07")
         self.assertEqual(len(turnos), 1)

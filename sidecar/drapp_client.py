@@ -156,7 +156,17 @@ def reprogramar_turno(event_id: str, day: str, time: str, idempotency_key: str =
 def list_turnos_medicina_general(desde: str, hasta: str):
     """Filtra en nuestro propio código -- la API de DrApp no tiene un filtro
     de "tipo de práctica" en /events, así que se excluye por `service.label`
-    (mismo enfoque por palabras clave que ya usa el bot de n8n)."""
+    (mismo enfoque por palabras clave que ya usa el bot de n8n).
+
+    v0.2.6 -- confirmado en vivo contra la cuenta real: `/events` con
+    `status=booked` también devuelve entradas `type: "lock"` (bloqueos de
+    agenda / feriados, sin paciente ni service real, `duration` de un día
+    entero) -- no son turnos, y sin este filtro entraban como si lo fueran
+    (`consumer` vacío, terminaban como "(sin nombre en DrApp)" en la
+    bandeja de Marianela). `type` no está documentado en el schema oficial
+    de Event, así que solo se excluye cuando está presente y NO es
+    "appointment" -- si algún día falta el campo, no se pierde el turno por
+    las dudas."""
     _, team_id = _config()
     eventos = _request(
         "GET", f"/teams/{team_id}/events",
@@ -164,7 +174,8 @@ def list_turnos_medicina_general(desde: str, hasta: str):
     ) or []
     return [
         e for e in eventos
-        if "psiquiatr" not in (e.get("service", {}).get("label", "") or "").lower()
+        if e.get("type") in (None, "appointment")
+        and "psiquiatr" not in (e.get("service", {}).get("label", "") or "").lower()
     ]
 
 
