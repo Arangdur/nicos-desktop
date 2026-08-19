@@ -131,14 +131,18 @@ def turnos_para_enviar_ahora(ahora: datetime.datetime = None):
     return para_enviar
 
 
-def sincronizar_desde_drapp(turnos_drapp: list, sincronizado_by: str = "sistema"):
+def sincronizar_desde_drapp(turnos_drapp: list, sincronizado_by: str = "nicolas"):
     """Upsert idempotente de turnos leídos de la API de DrApp, por
     `drapp_event_id` -- cada dict de `turnos_drapp` trae paciente_nombre,
     telefono (o None), fecha_turno, hora_turno, cobertura, practica,
     drapp_event_id. Nunca toca los turnos cargados a mano (drapp_event_id
     NULL) ni reabre uno que ya se envió o falló -- evita mandar un
     recordatorio dos veces si DrApp devuelve el mismo turno en dos
-    sincronizaciones seguidas."""
+    sincronizaciones seguidas.
+
+    `sincronizado_by` default "nicolas" (no "sistema") -- creado_by tiene FK
+    real contra users(user_id), y "sistema" rompía con IntegrityError apenas
+    se usara sin pasar el argumento a mano (hallazgo real, ver worker.py)."""
     conn = db.get_connection()
     now = _now_iso()
     importados = 0

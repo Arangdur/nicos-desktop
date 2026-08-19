@@ -514,7 +514,14 @@ def _sincronizar_drapp_si_corresponde():
             "practica": (evento.get("service") or {}).get("label", ""),
         })
     if turnos:
-        recordatorios.sincronizar_desde_drapp(turnos, sincronizado_by="drapp-sync")
+        # v0.2.6 -- creado_by tiene FK real contra users(user_id) -- "drapp-sync"
+        # no es una persona real, así que esto rompía con IntegrityError apenas
+        # corría (encontrado en vivo, se llevó el worker entero de fondo: los
+        # loops de recordatorios/WhatsApp/mail/facturas/tareas comparten este
+        # mismo hilo, ver run_forever). Mismo criterio que
+        # /api/v1/recordatorios/importar y facturas.py para acciones
+        # automáticas: se atribuyen al Director dueño de la cuenta.
+        recordatorios.sincronizar_desde_drapp(turnos, sincronizado_by="nicolas")
 
 
 def _procesar_mensajes_whatsapp_si_corresponde():
@@ -603,17 +610,32 @@ def run_forever():
     recover_orphaned_tasks()
     sys.stderr.write("[worker] loop arrancado\n")
     while True:
-        _procesar_recordatorios_si_corresponde()
-        _sincronizar_drapp_si_corresponde()
-        _procesar_mensajes_whatsapp_si_corresponde()
-        _procesar_facturas_si_corresponde()
-        _sincronizar_mail_si_corresponde()
-        _procesar_mail_si_corresponde()
-        task = _claim_next_task()
-        if task is None:
+        # v0.2.6 -- hallazgo real: un IntegrityError sin atrapar en
+        # _sincronizar_drapp_si_corresponde tiró abajo este hilo ENTERO --
+        # como todas las revisiones periódicas (recordatorios, WhatsApp,
+        # facturas, mail) y el procesamiento de tareas comparten el mismo
+        # loop, un bug en una sola de ellas dejaba TODO el trabajo de fondo
+        # muerto en silencio (el servidor HTTP seguía respondiendo, pero
+        # ninguna tarea nueva se procesaba nunca más) hasta reiniciar la app
+        # a mano. Cada función ya maneja sus propios errores esperables
+        # puntualmente -- este try/except de acá es la red de seguridad
+        # para lo que ninguna previó, para que un bug futuro cueste como
+        # mucho un tick salteado, no todo el sistema.
+        try:
+            _procesar_recordatorios_si_corresponde()
+            _sincronizar_drapp_si_corresponde()
+            _procesar_mensajes_whatsapp_si_corresponde()
+            _procesar_facturas_si_corresponde()
+            _sincronizar_mail_si_corresponde()
+            _procesar_mail_si_corresponde()
+            task = _claim_next_task()
+            if task is None:
+                time.sleep(POLL_INTERVAL_SECONDS)
+                continue
+            if task["state"] in ("received", "parsing"):
+                _process_classification(task)
+            elif task["state"] == "ready":
+                _process_execution(task)
+        except Exception:
+            sys.stderr.write("[worker] ERROR no esperado en el loop -- se sigue en el próximo tick:\n" + traceback.format_exc() + "\n")
             time.sleep(POLL_INTERVAL_SECONDS)
-            continue
-        if task["state"] in ("received", "parsing"):
-            _process_classification(task)
-        elif task["state"] == "ready":
-            _process_execution(task)

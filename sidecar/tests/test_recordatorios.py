@@ -41,6 +41,7 @@ os.environ["NICOS_DB_PATH"] = _TMP_DB.name
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import db  # noqa: E402
+import drapp_client  # noqa: E402
 import pairing  # noqa: E402
 import recordatorios  # noqa: E402
 import server  # noqa: E402
@@ -373,6 +374,26 @@ class TestWorkerGlue(unittest.TestCase):
 
         fila = [r for r in recordatorios.list_recordatorios() if r["id"] == recordatorio_id][0]
         self.assertEqual(fila["estado"], "fallo_envio")
+
+    @patch("drapp_client.list_turnos_medicina_general")
+    def test_sync_drapp_no_rompe_el_worker_por_creado_by_invalido(self, mock_list):
+        # v0.2.6 -- hallazgo real en producción: sincronizar_desde_drapp
+        # pasaba "drapp-sync" como creado_by, que no es un user_id real --
+        # creado_by tiene FK contra users(user_id), así que esto tiraba
+        # sqlite3.IntegrityError y se llevaba el hilo del worker entero (ver
+        # worker.run_forever). No debe volver a pasar.
+        mock_list.return_value = [{
+            "id": "events/abc123", "day": "2026-08-20", "time": "10:00",
+            "service": {"label": "Medicina General"}, "consumer": {"id": "consumers/xyz", "firstName": "Juan", "lastName": "Pérez"},
+        }]
+        with patch.dict(os.environ, {"DRAPP_API_KEY": "drapp_live_test", "DRAPP_TEAM_ID": "4641e3fd"}):
+            with patch("drapp_client.get_telefono_paciente", return_value="+5493584390000"):
+                worker._ultimo_sync_drapp = None
+                worker._sincronizar_drapp_si_corresponde()  # no debe levantar
+
+        turnos = recordatorios.list_recordatorios()
+        self.assertEqual(len(turnos), 1)
+        self.assertEqual(turnos[0]["creado_by"], "nicolas")
 
 
 if __name__ == "__main__":
