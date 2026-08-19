@@ -23,6 +23,7 @@ import secrets
 
 import ai_router
 import db
+import turnos_conversacion
 import twilio_client
 
 ESTADOS_VALIDOS = {"recibido", "borrador_generado", "error_clasificacion", "aprobado_enviado", "rechazado"}
@@ -78,14 +79,38 @@ def generar_borrador(mensaje_id: str) -> dict:
     falla igual (both_failed / auth_error), el mensaje NO se pierde: queda
     en 'error_clasificacion' con el texto original intacto y visible en la
     bandeja, para que una persona lo redacte a mano -- nunca se descarta un
-    mensaje de un paciente por un error de la IA."""
+    mensaje de un paciente por un error de la IA.
+
+    v0.2.6 -- Fase C (turnos_conversacion.py): si el teléfono tiene una
+    conversación de turno activa, este mensaje es una RESPUESTA a un
+    horario ya ofrecido -- se salta la clasificación genérica y se
+    interpreta directo contra esa conversación, lo que puede terminar
+    creando el turno de verdad en DrApp (automático -- ver nota de diseño
+    en turnos_conversacion.py, confirmada con Nicolás). Si la
+    clasificación normal da turno_nuevo/cancelacion y DrApp está
+    configurado, el borrador usa horarios reales en vez del texto
+    genérico de la IA -- si DrApp no está configurado o falla, se usa ese
+    texto genérico como respaldo, igual que siempre. En NINGÚN caso esto
+    manda nada por Twilio -- el mensaje sigue esperando aprobación como
+    cualquier otro (ver aprobar_y_enviar)."""
     conn = db.get_connection()
     row = conn.execute("SELECT * FROM mensajes_whatsapp_entrantes WHERE id = ?", (mensaje_id,)).fetchone()
     if row is None:
         raise MensajeWhatsappError(f"Mensaje no encontrado: {mensaje_id}")
+    now = _now_iso()
+
+    respuesta_conversacion = turnos_conversacion.procesar_eleccion(row["telefono"], row["texto_original"])
+    if respuesta_conversacion is not None:
+        conn.execute(
+            "UPDATE mensajes_whatsapp_entrantes SET "
+            "clasificacion = 'turno_nuevo', requiere_profesional = 0, urgente = 0, borrador_respuesta = ?, "
+            "estado = 'borrador_generado', borrador_generado_at = ? WHERE id = ?",
+            (respuesta_conversacion, now, mensaje_id),
+        )
+        conn.commit()
+        return {"ok": True, "clasificacion": "turno_nuevo"}
 
     resultado = ai_router.clasificar_y_redactar_mensaje(row["texto_original"])
-    now = _now_iso()
 
     if resultado["outcome"] != "success":
         conn.execute(
@@ -96,13 +121,24 @@ def generar_borrador(mensaje_id: str) -> dict:
         return {"ok": False, "outcome": resultado["outcome"]}
 
     data = resultado["data"]
+    borrador_respuesta = data["borrador_respuesta"]
+
+    if data["clasificacion"] == "turno_nuevo":
+        ofrecido = turnos_conversacion.ofrecer_horarios(row["telefono"])
+        if ofrecido is not None:
+            borrador_respuesta = ofrecido
+    elif data["clasificacion"] == "cancelacion":
+        cancelado = turnos_conversacion.iniciar_cancelacion(row["telefono"])
+        if cancelado is not None:
+            borrador_respuesta = cancelado
+
     conn.execute(
         "UPDATE mensajes_whatsapp_entrantes SET "
         "clasificacion = ?, requiere_profesional = ?, urgente = ?, borrador_respuesta = ?, "
         "estado = 'borrador_generado', borrador_generado_at = ? WHERE id = ?",
         (
             data["clasificacion"], int(data["requiere_profesional"]), int(data["urgente"]),
-            data["borrador_respuesta"], now, mensaje_id,
+            borrador_respuesta, now, mensaje_id,
         ),
     )
     conn.commit()

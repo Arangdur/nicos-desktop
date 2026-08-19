@@ -203,3 +203,13 @@ def get_telefono_paciente(consumer_id: str):
     paciente = _request("GET", f"/teams/{team_id}/consumers/{consumer_id}")
     telefonos = (paciente or {}).get("phones", [])
     return telefonos[0]["value"] if telefonos else None
+
+
+def listar_turnos_de_paciente(consumer_id: str):
+    """Historial completo de turnos de un paciente (todos los estados,
+    todas las especialidades) -- filtrar por 'status'/'type'/especialidad
+    es responsabilidad de quien llama, igual que list_turnos_medicina_general.
+    v0.2.6, Fase C (cancelación por WhatsApp)."""
+    _, team_id = _config()
+    consumer_id = _strip_prefix(consumer_id, "consumers/")
+    return _request("GET", f"/teams/{team_id}/consumers/{consumer_id}/events") or []

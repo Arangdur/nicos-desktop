@@ -708,6 +708,141 @@ def clasificar_y_redactar_mail(casilla: str, asunto: str, cuerpo: str, provider:
     return {"outcome": "both_failed", "error": combined_error, "attempts": attempts}
 
 
+# v0.2.6 -- Fase C: interpretar qué horario eligió el paciente entre los que
+# ya se le ofrecieron (turnos_conversacion.py). A propósito NO es la misma
+# tarea que clasificar_y_redactar_mensaje -- acá la IA nunca propone nada
+# nuevo, solo elige un ÍNDICE dentro de una lista cerrada que ya armamos
+# nosotros con datos reales de DrApp. El peor caso posible es que elija mal
+# o diga "no entendí" -- nunca puede inventar un horario que no esté en la
+# lista, porque la salida es un índice, no texto libre.
+
+def _interpretar_eleccion_system_prompt(opciones: list) -> str:
+    lista = "\n".join(f"{i}: {o['label']}" for i, o in enumerate(opciones))
+    return f"""Un paciente le escribió al consultorio para elegir un horario de turno, entre estas \
+opciones que ya se le ofrecieron por WhatsApp (numeradas del 0 en adelante):
+
+{lista}
+
+Tu única tarea es decidir cuál de estas opciones eligió, según su respuesta. Si dice "el segundo"
+o "el 2" elige la opción de índice 1 (la gente cuenta desde 1, no desde 0). Si menciona un horario
+o día que coincide claramente con una opción (ej. "el de las 10", "el lunes"), elegís esa. Si la
+respuesta no elige ninguna con claridad, no coincide con ninguna opción real, o pide algo distinto
+(cambiar de fecha, cancelar, otra cosa), `eleccion` es null -- NUNCA elijas una opción por las
+dudas si no estás seguro."""
+
+
+INTERPRETAR_ELECCION_JSON_SCHEMA = {
+    "name": "eleccion_turno",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "eleccion": {"type": ["integer", "null"]},
+        },
+        "required": ["eleccion"],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
+
+def _validate_eleccion_shape(data, cantidad_opciones):
+    if not isinstance(data, dict):
+        return f"la respuesta no es un objeto JSON (vino {type(data).__name__})"
+    if "eleccion" not in data:
+        return "falta el campo 'eleccion'"
+    eleccion = data["eleccion"]
+    if eleccion is not None and (not isinstance(eleccion, int) or isinstance(eleccion, bool) or not (0 <= eleccion < cantidad_opciones)):
+        return f"'eleccion' fuera de rango: {eleccion!r} (opciones válidas: 0..{cantidad_opciones - 1} o null)"
+    return None
+
+
+def _try_interpretar_eleccion(provider_name: str, opciones: list, texto: str) -> dict:
+    system_prompt = _interpretar_eleccion_system_prompt(opciones)
+    if provider_name == "openai":
+        client = _get_openai_client()
+        if client is None:
+            return {"status": "auth_error", "provider": "openai", "error": _openai_error}
+        try:
+            resp = client.chat.completions.create(
+                model=os.getenv("OPENAI_MODEL", "gpt-5"),
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": texto},
+                ],
+                response_format={"type": "json_schema", "json_schema": INTERPRETAR_ELECCION_JSON_SCHEMA},
+            )
+            raw_content = resp.choices[0].message.content
+            try:
+                data = json.loads(raw_content)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"status": "malformed", "provider": "openai", "error": f"JSON inválido: {e}"}
+        except Exception as e:
+            status = "auth_error" if _classify_exception(e) == "auth" else "transient_error"
+            return {"status": status, "provider": "openai", "error": f"{type(e).__name__}: {e}"}
+    else:
+        client = _get_claude_client()
+        if client is None:
+            return {"status": "auth_error", "provider": "claude", "error": _claude_error}
+        try:
+            resp = client.messages.create(
+                model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5"),
+                max_tokens=200,
+                system=system_prompt,
+                tools=[{
+                    "name": "eleccion_turno",
+                    "description": "Qué opción de horario eligió el paciente, o null si no está claro.",
+                    "input_schema": INTERPRETAR_ELECCION_JSON_SCHEMA["schema"],
+                }],
+                tool_choice={"type": "tool", "name": "eleccion_turno"},
+                messages=[{"role": "user", "content": texto}],
+            )
+            tool_block = next((b for b in resp.content if b.type == "tool_use"), None)
+            if tool_block is None:
+                return {"status": "malformed", "provider": "claude", "error": "la respuesta no incluyó el tool_use esperado"}
+            data = tool_block.input
+        except Exception as e:
+            status = "auth_error" if _classify_exception(e) == "auth" else "transient_error"
+            return {"status": status, "provider": "claude", "error": f"{type(e).__name__}: {e}"}
+
+    shape_error = _validate_eleccion_shape(data, len(opciones))
+    if shape_error:
+        return {"status": "malformed", "provider": provider_name, "error": shape_error}
+    return {"status": "success", "provider": provider_name, "data": data}
+
+
+def interpretar_eleccion_turno(opciones: list, texto: str, provider: str = None) -> dict:
+    """`opciones` = lista de dicts con al menos 'label' (texto legible, ej.
+    "jueves 20/08 a las 10:00hs"). Mismo contrato 'outcome' que el resto del
+    router. `data['eleccion']` es un índice válido de `opciones`, o None."""
+    provider = provider or get_provider_for("interpretar_eleccion_turno", default="claude")
+    alternate = "claude" if provider == "openai" else "openai"
+
+    attempts = []
+    first = _try_interpretar_eleccion(provider, opciones, texto)
+    attempts.append(first)
+
+    if first["status"] == "success":
+        return {"outcome": "success", "data": first["data"], "provider": provider, "attempts": attempts}
+
+    if first["status"] == "auth_error":
+        return {"outcome": "auth_error", "provider": provider, "error": first["error"], "attempts": attempts}
+
+    if not get_provider_matrix().get("fallback_on_primary_failure", True):
+        return {"outcome": "both_failed", "error": first["error"], "attempts": attempts}
+
+    second = _try_interpretar_eleccion(alternate, opciones, texto)
+    attempts.append(second)
+
+    if second["status"] == "success":
+        return {
+            "outcome": "success", "data": second["data"], "provider": alternate,
+            "fell_back_from": provider, "attempts": attempts,
+        }
+
+    combined_error = f"{provider}: {first['error']} | {alternate}: {second['error']}"
+    return {"outcome": "both_failed", "error": combined_error, "attempts": attempts}
+
+
 # v0.2.6 -- extracción de pedidos de factura para el bot de facturación ARCA
 # (ver CFO y Decisiones Estrategicas/Proyecto_Facturacion_WhatsApp_ARCA.md).
 # Mismo patrón de resiliencia que extract()/clasificar_y_redactar_mensaje().

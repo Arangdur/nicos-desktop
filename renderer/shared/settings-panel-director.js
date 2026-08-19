@@ -90,6 +90,24 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
     </div>
 
     <div class="card">
+      <h3>DrApp — Reserva de turnos por WhatsApp (Fase C)</h3>
+      <p class="help-text">
+        Para que el bot pueda ofrecer horarios reales y crear/cancelar el turno solo cuando
+        el paciente confirma por escrito. El Resource ID sos vos como profesional dentro de tu
+        cuenta de DrApp (ej. <code>resources/8c8a2304</code>) y el Service Key identifica
+        "Medicina General / Consulta" (ej. <code>pms_specialties:medicina-general/pms_practices:consulta</code>)
+        -- los dos se ven en la respuesta de <code>GET /teams/&lt;team&gt;/resources</code> y
+        <code>/services</code> de la API de DrApp. Sin estos dos campos, el bot sigue
+        respondiendo "alguien te va a confirmar" como hasta ahora -- no rompe nada, solo no
+        ofrece horarios reales todavía.
+      </p>
+      <label>Resource ID</label>
+      <input type="text" id="drapp-resource-id" value="${current.DRAPP_RESOURCE_ID || ''}" placeholder="resources/8c8a2304">
+      <label>Service Key — Medicina General</label>
+      <input type="text" id="drapp-service-key" value="${current.DRAPP_SERVICE_KEY_MEDICINA_GENERAL || ''}" placeholder="pms_specialties:medicina-general/pms_practices:consulta">
+    </div>
+
+    <div class="card">
       <h3>Mail entrante — Gmail (consultorio y Fundación Abate)</h3>
       <p class="help-text">
         Para que NicOS lea y conteste (con tu aprobación) los mails de novogen.salud@gmail.com
@@ -162,6 +180,8 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
       TWILIO_ACCOUNT_SID: containerEl.querySelector('#twilio-sid').value.trim(),
       TWILIO_WHATSAPP_FROM: containerEl.querySelector('#twilio-from').value.trim(),
       DRAPP_TEAM_ID: containerEl.querySelector('#drapp-team').value.trim(),
+      DRAPP_RESOURCE_ID: containerEl.querySelector('#drapp-resource-id').value.trim(),
+      DRAPP_SERVICE_KEY_MEDICINA_GENERAL: containerEl.querySelector('#drapp-service-key').value.trim(),
       TWILIO_WEBHOOK_BASE_URL: containerEl.querySelector('#twilio-webhook-base').value.trim().replace(/\/$/, ''),
       FACTURACION_TELEFONOS_AUTORIZADOS: containerEl.querySelector('#facturacion-telefonos').value.trim(),
       GMAIL_CLIENT_ID: containerEl.querySelector('#gmail-client-id').value.trim(),
