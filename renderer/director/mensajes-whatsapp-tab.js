@@ -10,6 +10,14 @@ const CLASIFICACION_LABEL = {
   turno_nuevo: 'Turno nuevo', cancelacion: 'Cancelación', reprogramacion: 'Reprogramación',
   consulta_general: 'Consulta general', receta: 'Receta', ambiguo: 'Ambiguo',
 };
+// v0.2.6 -- Fase C: si el paciente ya confirmó por escrito, el turno se
+// crea/cancela solo en DrApp ANTES de que nadie apruebe este mensaje (ver
+// turnos_conversacion.py) -- este tag distingue esa tarjeta de un simple
+// borrador/oferta, para que rechazarla no se confunda con "no pasó nada".
+const ACCION_DRAPP_LABEL = {
+  turno_creado: 'Turno ya creado en DrApp',
+  turno_cancelado: 'Turno ya cancelado en DrApp',
+};
 // v0.2.5 -- Impeccable P2 (re-critique): mismo fix que operativa/mensajes-whatsapp-tab.js.
 const ESTADO_MENSAJE_TAG = {
   recibido: { clase: 'proceso', label: 'Procesando...' },
@@ -100,7 +108,13 @@ async function _renderListaMensajesWhatsapp() {
     btnRechazar.addEventListener('click', async () => {
       // v0.2.5 -- Impeccable P2 (re-critique): mismo fix que Operativa -- ver
       // esa vista para el detalle.
-      const ok = await showConfirm('Rechazar este mensaje', 'El borrador se descarta, no se manda nada.', { confirmLabel: 'Rechazar', danger: true });
+      // v0.2.6 -- si accion_drapp está seteado, el turno ya se creó/canceló
+      // de verdad en DrApp -- rechazar esto NO lo deshace, solo evita que
+      // el paciente se entere por WhatsApp. Aviso explícito para no confundir.
+      const avisoTexto = m.accion_drapp
+        ? `El turno ya ${m.accion_drapp === 'turno_creado' ? 'se creó' : 'se canceló'} en DrApp -- rechazar esto NO lo deshace, solo evita que el paciente reciba este mensaje.`
+        : 'El borrador se descarta, no se manda nada.';
+      const ok = await showConfirm('Rechazar este mensaje', avisoTexto, { confirmLabel: 'Rechazar', danger: true });
       if (!ok) return;
       btnRechazar.disabled = true;
       const result = await mensajesWhatsappFetch(`/api/v1/whatsapp/mensajes/${m.id}/rechazar`, { method: 'POST' });
@@ -127,6 +141,7 @@ function _cardMensaje(m) {
           ${m.urgente ? '<span class="tag nuevo">Urgente</span>' : ''}
           ${m.clasificacion ? `<span class="tag proceso">${CLASIFICACION_LABEL[m.clasificacion] || m.clasificacion}</span>` : ''}
           ${m.requiere_profesional ? '<span class="tag nuevo">Requiere profesional</span>' : ''}
+          ${m.accion_drapp ? `<span class="tag resuelto">${ACCION_DRAPP_LABEL[m.accion_drapp] || m.accion_drapp}</span>` : ''}
           <span class="tag ${tag.clase}">${tag.label}</span>
         </div>
       </div>

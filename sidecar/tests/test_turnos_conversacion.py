@@ -74,8 +74,10 @@ class TestOfrecerHorarios(_BaseTemp):
     def test_arma_hasta_tres_opciones_reales(self, mock_disp):
         mock_disp.return_value = DISPONIBILIDAD_FAKE
         with patch.dict(os.environ, DRAPP_ENV):
-            texto = turnos_conversacion.ofrecer_horarios("+5493584390002")
-        self.assertIsNotNone(texto)
+            resultado = turnos_conversacion.ofrecer_horarios("+5493584390002")
+        self.assertIsNotNone(resultado)
+        self.assertIsNone(resultado["accion"])  # ofrecer nunca ejecuta nada en DrApp
+        texto = resultado["texto"]
         self.assertIn("1)", texto)
         self.assertIn("2)", texto)
         self.assertIn("3)", texto)
@@ -92,8 +94,9 @@ class TestOfrecerHorarios(_BaseTemp):
     def test_sin_horarios_disponibles_no_crea_conversacion(self, mock_disp):
         mock_disp.return_value = {"slots": {}}
         with patch.dict(os.environ, DRAPP_ENV):
-            texto = turnos_conversacion.ofrecer_horarios("+5493584390003")
-        self.assertIn("no encuentro horarios", texto.lower())
+            resultado = turnos_conversacion.ofrecer_horarios("+5493584390003")
+        self.assertIn("no encuentro horarios", resultado["texto"].lower())
+        self.assertIsNone(resultado["accion"])
         self.assertIsNone(turnos_conversacion.hay_conversacion_activa("+5493584390003"))
 
     @patch("drapp_client.consultar_disponibilidad", side_effect=drapp_client.DrAppAPIError("server_error", "falló", 500))
@@ -122,9 +125,10 @@ class TestProcesarEleccion(_BaseTemp):
         mock_crear.return_value = {"id": "events/nuevo123"}
 
         with patch.dict(os.environ, DRAPP_ENV):
-            texto = turnos_conversacion.procesar_eleccion(telefono, "el segundo por favor")
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "el segundo por favor")
 
-        self.assertIn("confirmado", texto.lower())
+        self.assertIn("confirmado", resultado["texto"].lower())
+        self.assertEqual(resultado["accion"], "turno_creado")
         mock_crear.assert_called_once_with(
             "resources/8c8a2304", "pms_specialties:medicina-general/pms_practices:consulta",
             "consumers/xyz789", "2026-08-20", "10:10",  # opción de índice 1
@@ -146,9 +150,10 @@ class TestProcesarEleccion(_BaseTemp):
         mock_interp.return_value = {"outcome": "success", "data": {"eleccion": None}}
 
         with patch.dict(os.environ, DRAPP_ENV):
-            texto = turnos_conversacion.procesar_eleccion(telefono, "no sé, cualquiera")
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "no sé, cualquiera")
 
-        self.assertIn("no pude identificar", texto.lower())
+        self.assertIn("no pude identificar", resultado["texto"].lower())
+        self.assertIsNone(resultado["accion"])
         mock_crear.assert_not_called()
         conv = self._conv_de(telefono)
         self.assertEqual(conv["estado"], "esperando_eleccion")  # sigue abierta
@@ -159,8 +164,9 @@ class TestProcesarEleccion(_BaseTemp):
     def test_conflicto_409_no_se_trata_como_exito(self, mock_interp, mock_buscar, mock_crear):
         telefono = self._ofrecer()
         with patch.dict(os.environ, DRAPP_ENV):
-            texto = turnos_conversacion.procesar_eleccion(telefono, "el primero")
-        self.assertIn("se ocupó", texto.lower())
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "el primero")
+        self.assertIn("se ocupó", resultado["texto"].lower())
+        self.assertIsNone(resultado["accion"])
         conv = self._conv_de(telefono)
         self.assertEqual(conv["estado"], "expirado")
 
@@ -170,8 +176,9 @@ class TestProcesarEleccion(_BaseTemp):
     def test_paciente_no_encontrado_deriva_no_crea_paciente(self, mock_interp, mock_buscar, mock_crear):
         telefono = self._ofrecer()
         with patch.dict(os.environ, DRAPP_ENV):
-            texto = turnos_conversacion.procesar_eleccion(telefono, "el primero")
-        self.assertIn("no te encuentro", texto.lower())
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "el primero")
+        self.assertIn("no te encuentro", resultado["texto"].lower())
+        self.assertIsNone(resultado["accion"])
         mock_crear.assert_not_called()
         conv = self._conv_de(telefono)
         self.assertEqual(conv["estado"], "derivado")
@@ -186,15 +193,17 @@ class TestIniciarCancelacion(_BaseTemp):
     @patch("drapp_client.buscar_paciente_por_telefono", return_value=None)
     def test_paciente_no_encontrado_deriva(self, mock_buscar):
         with patch.dict(os.environ, DRAPP_ENV):
-            texto = turnos_conversacion.iniciar_cancelacion("+5493584390021")
-        self.assertIn("no te encuentro", texto.lower())
+            resultado = turnos_conversacion.iniciar_cancelacion("+5493584390021")
+        self.assertIn("no te encuentro", resultado["texto"].lower())
+        self.assertIsNone(resultado["accion"])
 
     @patch("drapp_client.listar_turnos_de_paciente", return_value=[])
     @patch("drapp_client.buscar_paciente_por_telefono", return_value={"id": "consumers/x"})
     def test_sin_turnos_futuros_pide_aclaracion(self, mock_buscar, mock_listar):
         with patch.dict(os.environ, DRAPP_ENV):
-            texto = turnos_conversacion.iniciar_cancelacion("+5493584390022")
-        self.assertIn("no encontré", texto.lower())
+            resultado = turnos_conversacion.iniciar_cancelacion("+5493584390022")
+        self.assertIn("no encontré", resultado["texto"].lower())
+        self.assertIsNone(resultado["accion"])
 
     @patch("drapp_client.cancelar_turno")
     @patch("drapp_client.listar_turnos_de_paciente")
@@ -208,8 +217,9 @@ class TestIniciarCancelacion(_BaseTemp):
             "day": en_3_dias.strftime("%Y-%m-%d"), "time": en_3_dias.strftime("%H:%M"),
         }]
         with patch.dict(os.environ, DRAPP_ENV):
-            texto = turnos_conversacion.iniciar_cancelacion("+5493584390023")
-        self.assertIn("cancelamos", texto.lower())
+            resultado = turnos_conversacion.iniciar_cancelacion("+5493584390023")
+        self.assertIn("cancelamos", resultado["texto"].lower())
+        self.assertEqual(resultado["accion"], "turno_cancelado")
         mock_cancelar.assert_called_once_with("events/abc")
 
     @patch("drapp_client.cancelar_turno")
@@ -224,8 +234,9 @@ class TestIniciarCancelacion(_BaseTemp):
             "day": en_5_horas.strftime("%Y-%m-%d"), "time": en_5_horas.strftime("%H:%M"),
         }]
         with patch.dict(os.environ, DRAPP_ENV):
-            texto = turnos_conversacion.iniciar_cancelacion("+5493584390024")
-        self.assertIn("menos de 24hs", texto.lower())
+            resultado = turnos_conversacion.iniciar_cancelacion("+5493584390024")
+        self.assertIn("menos de 24hs", resultado["texto"].lower())
+        self.assertIsNone(resultado["accion"])
         mock_cancelar.assert_not_called()
 
     @patch("drapp_client.cancelar_turno")
@@ -240,8 +251,9 @@ class TestIniciarCancelacion(_BaseTemp):
         }
         mock_listar.return_value = [dict(base, id="events/uno"), dict(base, id="events/dos")]
         with patch.dict(os.environ, DRAPP_ENV):
-            texto = turnos_conversacion.iniciar_cancelacion("+5493584390025")
-        self.assertIn("más de un turno", texto.lower())
+            resultado = turnos_conversacion.iniciar_cancelacion("+5493584390025")
+        self.assertIn("más de un turno", resultado["texto"].lower())
+        self.assertIsNone(resultado["accion"])
         mock_cancelar.assert_not_called()
 
     @patch("drapp_client.cancelar_turno")
@@ -256,8 +268,9 @@ class TestIniciarCancelacion(_BaseTemp):
             "day": en_3_dias.strftime("%Y-%m-%d"), "time": en_3_dias.strftime("%H:%M"),
         }]
         with patch.dict(os.environ, DRAPP_ENV):
-            texto = turnos_conversacion.iniciar_cancelacion("+5493584390026")
-        self.assertIn("no encontré", texto.lower())  # no hay turnos de Medicina General
+            resultado = turnos_conversacion.iniciar_cancelacion("+5493584390026")
+        self.assertIn("no encontré", resultado["texto"].lower())  # no hay turnos de Medicina General
+        self.assertIsNone(resultado["accion"])
         mock_cancelar.assert_not_called()
 
 
@@ -281,6 +294,7 @@ class TestIntegracionMensajesWhatsapp(_BaseTemp):
         mensaje = mensajes_whatsapp.list_mensajes()[0]
         self.assertIn("confirmado", mensaje["borrador_respuesta"].lower())
         self.assertFalse(mensaje["requiere_profesional"])
+        self.assertEqual(mensaje["accion_drapp"], "turno_creado")  # el tag que ve Marianela/Nicolás
 
     @patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE)
     @patch("ai_router.clasificar_y_redactar_mensaje")
@@ -297,6 +311,7 @@ class TestIntegracionMensajesWhatsapp(_BaseTemp):
         mensaje = mensajes_whatsapp.list_mensajes()[0]
         self.assertIn("1)", mensaje["borrador_respuesta"])  # opciones reales, no el texto genérico
         self.assertNotIn("texto genérico", mensaje["borrador_respuesta"])
+        self.assertIsNone(mensaje["accion_drapp"])  # solo ofreció, todavía no reservó nada
 
     @patch("ai_router.clasificar_y_redactar_mensaje")
     def test_turno_nuevo_sin_drapp_usa_el_texto_generico_de_respaldo(self, mock_clasificar):

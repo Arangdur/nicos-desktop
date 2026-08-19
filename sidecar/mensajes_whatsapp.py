@@ -104,8 +104,8 @@ def generar_borrador(mensaje_id: str) -> dict:
         conn.execute(
             "UPDATE mensajes_whatsapp_entrantes SET "
             "clasificacion = 'turno_nuevo', requiere_profesional = 0, urgente = 0, borrador_respuesta = ?, "
-            "estado = 'borrador_generado', borrador_generado_at = ? WHERE id = ?",
-            (respuesta_conversacion, now, mensaje_id),
+            "accion_drapp = ?, estado = 'borrador_generado', borrador_generado_at = ? WHERE id = ?",
+            (respuesta_conversacion["texto"], respuesta_conversacion["accion"], now, mensaje_id),
         )
         conn.commit()
         return {"ok": True, "clasificacion": "turno_nuevo"}
@@ -122,23 +122,26 @@ def generar_borrador(mensaje_id: str) -> dict:
 
     data = resultado["data"]
     borrador_respuesta = data["borrador_respuesta"]
+    accion_drapp = None
 
     if data["clasificacion"] == "turno_nuevo":
         ofrecido = turnos_conversacion.ofrecer_horarios(row["telefono"])
         if ofrecido is not None:
-            borrador_respuesta = ofrecido
+            borrador_respuesta = ofrecido["texto"]
+            accion_drapp = ofrecido["accion"]
     elif data["clasificacion"] == "cancelacion":
         cancelado = turnos_conversacion.iniciar_cancelacion(row["telefono"])
         if cancelado is not None:
-            borrador_respuesta = cancelado
+            borrador_respuesta = cancelado["texto"]
+            accion_drapp = cancelado["accion"]
 
     conn.execute(
         "UPDATE mensajes_whatsapp_entrantes SET "
         "clasificacion = ?, requiere_profesional = ?, urgente = ?, borrador_respuesta = ?, "
-        "estado = 'borrador_generado', borrador_generado_at = ? WHERE id = ?",
+        "accion_drapp = ?, estado = 'borrador_generado', borrador_generado_at = ? WHERE id = ?",
         (
             data["clasificacion"], int(data["requiere_profesional"]), int(data["urgente"]),
-            borrador_respuesta, now, mensaje_id,
+            borrador_respuesta, accion_drapp, now, mensaje_id,
         ),
     )
     conn.commit()
