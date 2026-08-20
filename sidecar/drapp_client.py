@@ -181,9 +181,27 @@ def list_turnos_medicina_general(desde: str, hasta: str):
 
 # ---- Pacientes -------------------------------------------------------------
 
+def _variantes_telefono_ar(telefono: str) -> list:
+    """Un celular argentino en formato E.164 lleva un "9" después del "54"
+    (+549...) -- así lo manda WhatsApp siempre. Pero DrApp puede tenerlo
+    cargado sin ese "9" (+54...) -- confirmado en vivo (20/08): un paciente
+    real no aparecía buscando por el número tal cual llegaba de WhatsApp,
+    y sí estaba, guardado sin el "9". Devuelve el teléfono tal cual primero,
+    y la variante con el "9" agregado o sacado como segundo intento --
+    nunca asume cuál de las dos formas es la correcta."""
+    variantes = [telefono]
+    if telefono.startswith("+549"):
+        variantes.append("+54" + telefono[4:])
+    elif telefono.startswith("+54"):
+        variantes.append("+549" + telefono[3:])
+    return variantes
+
+
 def buscar_paciente_por_telefono(telefono: str):
     """Devuelve el primer paciente que coincide, o None si no hay ninguno --
-    nunca inventa ni asume una coincidencia parcial.
+    nunca inventa ni asume una coincidencia parcial. Prueba la variante con/
+    sin el "9" de celular argentino (ver _variantes_telefono_ar) antes de
+    rendirse -- una sola llamada extra, solo si la primera no encontró nada.
 
     v0.2.6 -- este endpoint devuelve un array DIRECTO (`type: array` en el
     spec real, confirmado con una request real contra el sandbox), no
@@ -192,8 +210,11 @@ def buscar_paciente_por_telefono(telefono: str):
     hubiera un match real, y el test que lo cubría mockeaba la forma
     incorrecta, así que nunca lo detectó."""
     _, team_id = _config()
-    pacientes = _request("GET", f"/teams/{team_id}/consumers", params={"phone": telefono}) or []
-    return pacientes[0] if pacientes else None
+    for variante in _variantes_telefono_ar(telefono):
+        pacientes = _request("GET", f"/teams/{team_id}/consumers", params={"phone": variante}) or []
+        if pacientes:
+            return pacientes[0]
+    return None
 
 
 def buscar_pacientes_por_texto(query: str) -> list:

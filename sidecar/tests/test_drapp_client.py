@@ -187,12 +187,28 @@ class TestPacientes(unittest.TestCase):
         mock_urlopen.return_value = _fake_response([])
         paciente = drapp_client.buscar_paciente_por_telefono("+5493537000000")
         self.assertIsNone(paciente)
+        self.assertEqual(mock_urlopen.call_count, 2)  # probó con y sin el "9"
 
     @patch("drapp_client.urllib.request.urlopen")
     def test_buscar_paciente_por_telefono_con_match(self, mock_urlopen):
         mock_urlopen.return_value = _fake_response([{"id": "consumers/xyz789", "firstName": "María"}])
         paciente = drapp_client.buscar_paciente_por_telefono("+5491155678901")
         self.assertEqual(paciente["id"], "consumers/xyz789")
+        self.assertEqual(mock_urlopen.call_count, 1)  # matcheó al primer intento, no hizo falta la variante
+
+    @patch("drapp_client.urllib.request.urlopen")
+    def test_buscar_paciente_por_telefono_reintenta_sin_el_9_de_celular_ar(self, mock_urlopen):
+        # v0.2.7 (20/08) -- hallazgo real: un paciente real (Nicolás mismo,
+        # de prueba) no aparecía buscando por el número tal cual lo manda
+        # WhatsApp (+549...) -- estaba cargado en DrApp sin el "9" de
+        # celular argentino (+54...). Si el primer intento no encuentra
+        # nada, reintenta con esa variante antes de rendirse.
+        mock_urlopen.side_effect = [_fake_response([]), _fake_response([{"id": "consumers/nico"}])]
+        paciente = drapp_client.buscar_paciente_por_telefono("+5493584390917")
+        self.assertEqual(paciente["id"], "consumers/nico")
+        self.assertEqual(mock_urlopen.call_count, 2)
+        segunda_url = mock_urlopen.call_args_list[1][0][0].full_url
+        self.assertIn("phone=%2B543584390917", segunda_url)
 
 
 if __name__ == "__main__":
