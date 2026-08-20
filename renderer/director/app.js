@@ -408,12 +408,28 @@ function loadChat() {
   });
 }
 
-function updateApiBase(newPort) {
-  // Se llama cuando Ajustes reinicia el sidecar (nuevo puerto efímero) --
-  // sin esto, Resumen/Tareas/Chat quedan pegados al puerto viejo (ya
-  // muerto) hasta que se recargue toda la ventana a mano.
+async function updateApiBase(newPort) {
+  // Se llama cuando Ajustes reinicia el sidecar (nuevo puerto efímero).
+  // v0.2.6 -- hallazgo real: esto solo reiniciaba Tareas -- el resto de
+  // las pestañas (Abate, Recordatorios, WhatsApp, Facturas, Mail) y la
+  // insignia de "conectado" arriba quedaban pegadas al puerto viejo (ya
+  // muerto) hasta recargar toda la ventana a mano, mostrando "sidecar no
+  // responde" aunque el sidecar nuevo estuviera perfectamente sano.
   API = `http://127.0.0.1:${newPort}`;
   initTasksTab(API);
+  initAbateTab(API);
+  initRecordatoriosTab(API);
+  initMensajesWhatsappTab(API, 'director');
+  initFacturasTab(API);
+  initMailTab(API, 'director');
+
+  const statusEl = document.getElementById('server-status');
+  try {
+    const ping = await fetchJson('/ping');
+    statusEl.textContent = ping.ok ? 'conectado' : 'error';
+  } catch (e) {
+    statusEl.textContent = 'sidecar no responde';
+  }
 }
 
 function loadAjustes() {
