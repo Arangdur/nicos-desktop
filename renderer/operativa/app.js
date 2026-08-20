@@ -64,6 +64,18 @@ async function init() {
     // el badge con eso -- se llama siempre, esté o no la pestaña a la vista
     // (el elemento sigue en el DOM oculto, actualizarlo es barato).
     loadMisTareas();
+
+    // v0.2.6 -- mismo pedido que del lado Director: Marianela no debería
+    // tener que recargar la página para ver un mensaje nuevo. Nunca se
+    // reconstruye la lista mientras hay un borrador siendo editado (se
+    // perdería lo tipeado) -- solo cuando la pestaña está visible y nada
+    // dentro tiene el foco.
+    const tabWa = document.getElementById('tab-mensajes-whatsapp');
+    if (tabWa && tabWa.style.display !== 'none') {
+      const activo = document.activeElement;
+      const editando = activo && tabWa.contains(activo) && ['TEXTAREA', 'INPUT', 'SELECT'].includes(activo.tagName);
+      if (!editando) _renderListaMensajesWhatsappOperativa();
+    }
   }, 20000);
 }
 

@@ -486,7 +486,26 @@ async function init() {
     if (document.getElementById('tab-resumen').style.display !== 'none') {
       _refrescarAtencion();
     }
+
+    // v0.2.6 -- pedido real de Nicolás mientras probaba Fase C: había que
+    // recargar la página a mano para ver una respuesta nueva del paciente
+    // en la Bandeja. Mismo criterio que Tareas arriba: nunca reconstruir
+    // la lista mientras hay un borrador siendo editado (perdería lo
+    // tipeado), solo cuando la pestaña está visible y nada tiene foco.
+    _refrescarSiVisibleYSinEdicion('tab-mensajes-whatsapp', _renderListaMensajesWhatsapp);
+    _refrescarSiVisibleYSinEdicion('tab-mail', _renderListaMail);
+    _refrescarSiVisibleYSinEdicion('tab-facturas', _renderListaFacturas);
+    _refrescarSiVisibleYSinEdicion('tab-recordatorios', _renderListaRecordatorios);
   }, 15000);
+}
+
+function _refrescarSiVisibleYSinEdicion(tabId, renderFn) {
+  const tab = document.getElementById(tabId);
+  if (!tab || tab.style.display === 'none') return;
+  const activo = document.activeElement;
+  const editando = activo && tab.contains(activo) && ['TEXTAREA', 'INPUT', 'SELECT'].includes(activo.tagName);
+  if (editando) return;
+  renderFn();
 }
 
 init();
