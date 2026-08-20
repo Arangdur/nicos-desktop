@@ -41,9 +41,10 @@ async function loadMensajesWhatsappTabOperativa() {
       <p class="help-text">
         Mensajes de pacientes con un borrador de respuesta ya armado -- revisalo (podés
         editarlo) y aprobalo para que salga, o rechazalo. Los que tocan algo clínico
-        quedan para que los apruebe Nicolás. Un saludo puro ("hola", "buen día") y el acuse
-        de un pedido de receta ya salen solos, sin pasar por acá -- los vas a ver marcados
-        como enviados. La receta en sí seguís gestionándola vos, como siempre.
+        quedan para que los apruebe Nicolás. Un saludo puro ("hola", "buen día"), el acuse
+        de un pedido de receta, y un mensaje de seguimiento sobre esa misma receta ya salen
+        solos, sin pasar por acá -- los vas a ver marcados como enviados. La receta en sí
+        seguís gestionándola vos, como siempre.
       </p>
     </div>
     <div id="mensajes-whatsapp-lista-op"></div>

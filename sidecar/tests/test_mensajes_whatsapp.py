@@ -339,13 +339,15 @@ class TestGenerarBorrador(unittest.TestCase):
 
     @patch("twilio_client.enviar_whatsapp")
     @patch("ai_router.clasificar_y_redactar_mensaje")
-    def test_segundo_mensaje_de_receta_no_repite_el_acuse(self, mock_clasificar, mock_enviar):
+    def test_segundo_mensaje_de_receta_lo_contesta_la_ia_libre_y_lo_manda(self, mock_clasificar, mock_enviar):
         # v0.2.7 (20/08) -- hallazgo real: un paciente preguntó "¿cómo
         # sabés qué receta necesito?" -- la IA lo volvió a clasificar como
         # 'receta' (menciona la palabra) y el acuse fijo se mandó de nuevo,
-        # textual, sin contestar nada. Con el acuse ya mandado hace poco,
-        # el segundo mensaje tiene que caer en el camino normal (una
-        # persona lo ve y contesta) en vez de repetir el acuse.
+        # textual, sin contestar nada. Decisión explícita de Nicolás: el
+        # PRIMER contacto manda el acuse fijo; un mensaje de seguimiento
+        # dentro de la ventana también se manda solo, pero con lo que la
+        # IA redactó para ESE mensaje puntual (contesta de verdad) -- única
+        # excepción real a "la IA solo redacta, nunca manda sola".
         telefono = "+5493584390010"
         mock_clasificar.return_value = {
             "outcome": "success",
@@ -367,11 +369,11 @@ class TestGenerarBorrador(unittest.TestCase):
         }
         segundo_id = mensajes_whatsapp.registrar_mensaje_entrante(telefono, "bueno gracias, pero como sabes que receta necesito?")["id"]
         resultado = mensajes_whatsapp.generar_borrador(segundo_id)
-        self.assertNotIn("auto_enviado", resultado)
-        mock_enviar.assert_called_once()  # sigue en uno solo -- no se repitió
-        segundo = mensajes_whatsapp.list_mensajes("borrador_generado")
-        self.assertEqual(len(segundo), 1)
-        self.assertEqual(segundo[0]["borrador_respuesta"], "¿Podrías decirme el nombre del medicamento?")
+        self.assertTrue(resultado.get("auto_enviado"))
+        mock_enviar.assert_called_with(telefono, "¿Podrías decirme el nombre del medicamento?")
+        self.assertEqual(mock_enviar.call_count, 2)  # se mandaron los dos, distintos
+        enviados = mensajes_whatsapp.list_mensajes("aprobado_enviado")
+        self.assertEqual(len(enviados), 2)
 
 
 class TestAprobarYRechazar(unittest.TestCase):

@@ -8,8 +8,15 @@ original). Primera vez que NicOS recibe un WhatsApp en vez de solo mandarlos
   cual) o rechaza -> si aprueba, ahí recién se manda por Twilio.
 
 La IA NUNCA manda un mensaje sola -- solo redacta. Esa es la regla de oro
-de toda esta pieza, no negociable (ver ai_router.clasificar_y_redactar_mensaje
-y la conversación de diseño que dio origen a esto).
+de toda esta pieza (ver ai_router.clasificar_y_redactar_mensaje y la
+conversación de diseño que dio origen a esto), con tres excepciones
+explícitas y acotadas, decididas por Nicolás en vivo (v0.2.6/v0.2.7):
+un saludo puro, el primer acuse de un pedido de receta (texto FIJO, no
+lo redacta la IA), y un mensaje de seguimiento sobre esa misma receta
+dentro de la ventana de ACUSE_RECETA_VIGENCIA_HORAS (ahí sí es la IA
+libre, la única excepción real a "solo redacta"). Cualquier otra cosa
+-- turno, cancelación, urgencia, el primer contacto por receta -- sigue
+esperando aprobación humana como siempre.
 
 Permisos (aplicados acá Y en server.py, defensa en profundidad, mismo
 patrón que recordatorios.py y abate_enfermeria.py):
@@ -166,7 +173,7 @@ def generar_borrador(mensaje_id: str) -> dict:
         if cancelado is not None:
             borrador_respuesta = cancelado["texto"]
             accion_drapp = cancelado["accion"]
-    elif data["clasificacion"] == "receta" and not _acuse_receta_reciente(row["telefono"]):
+    elif data["clasificacion"] == "receta":
         # v0.2.7 (20/08) -- pedido real de Nicolás: el acuse de "recibimos
         # tu pedido" no necesita esperar aprobación -- texto fijo (no el
         # que redacta la IA, para que sea siempre igual de consistente),
@@ -175,12 +182,17 @@ def generar_borrador(mensaje_id: str) -> dict:
         # aprueba nada clínico, solo avisa que el pedido llegó. Marianela
         # sigue viendo el pedido en la Bandeja igual que siempre.
         #
-        # hallazgo real: si ya se mandó este acuse hace poco (ver
-        # _acuse_receta_reciente), NO se repite -- un mensaje de
-        # seguimiento ("¿cómo sabés cuál necesito?") también clasifica
-        # 'receta' pero merece que una persona lo vea y conteste de
-        # verdad, no el mismo acuse de nuevo.
-        borrador_respuesta = ACUSE_RECETA
+        # hallazgo real: un mensaje de seguimiento ("¿cómo sabés cuál
+        # necesito?") también clasifica 'receta' -- repetir el mismo acuse
+        # ahí ignoraba la pregunta. Decisión explícita de Nicolás: si el
+        # acuse ya se mandó hace poco (ver _acuse_receta_reciente), se dej
+        # a el borrador que la IA armó para ESTE mensaje puntual (arriba)
+        # en vez del acuse fijo -- sigue siendo automático, pero ahora
+        # contesta de verdad. Única excepción real, y acotada, a que la
+        # IA solo redacta -- acá también manda, para algo clínico -- ver
+        # la nota de diseño al principio del módulo.
+        if not _acuse_receta_reciente(row["telefono"]):
+            borrador_respuesta = ACUSE_RECETA
 
     # v0.2.6 (20/08) -- pedido real de Nicolás: un saludo puro ("hola",
     # "buen día", "gracias") no necesita esperar que alguien lo apruebe --
@@ -193,7 +205,7 @@ def generar_borrador(mensaje_id: str) -> dict:
     # a mano).
     auto_enviable = accion_drapp is None and (
         (data["clasificacion"] == "ambiguo" and not data["requiere_profesional"] and not data["urgente"])
-        or (data["clasificacion"] == "receta" and borrador_respuesta == ACUSE_RECETA)
+        or data["clasificacion"] == "receta"
     )
     if auto_enviable:
         try:
