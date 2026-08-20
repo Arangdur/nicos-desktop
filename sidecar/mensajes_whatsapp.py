@@ -28,6 +28,16 @@ import twilio_client
 
 ESTADOS_VALIDOS = {"recibido", "borrador_generado", "error_clasificacion", "aprobado_enviado", "rechazado"}
 
+# v0.2.7 (20/08) -- pedido real de Nicolás: el acuse de un pedido de receta
+# se manda solo (ver generar_borrador) -- texto fijo, no lo redacta la IA,
+# para que sea siempre igual. Nunca dice nada clínico ni promete una
+# receta concreta -- solo avisa que el pedido llegó y se derivó.
+ACUSE_RECETA = (
+    "¡Hola! 👋 Recibimos tu pedido de receta y ya lo derivamos al área correspondiente para "
+    "que lo gestionen. En cuanto esté lista te avisamos por acá. ¡Gracias por tu paciencia! "
+    "Consultorio Dr. Nicolás Buso."
+)
+
 
 def _now_iso():
     return datetime.datetime.utcnow().isoformat()
@@ -134,21 +144,28 @@ def generar_borrador(mensaje_id: str) -> dict:
         if cancelado is not None:
             borrador_respuesta = cancelado["texto"]
             accion_drapp = cancelado["accion"]
+    elif data["clasificacion"] == "receta":
+        # v0.2.7 (20/08) -- pedido real de Nicolás: el acuse de "recibimos
+        # tu pedido" no necesita esperar aprobación -- texto fijo (no el
+        # que redacta la IA, para que sea siempre igual de consistente),
+        # se manda directo. La receta en sí sigue gestionándose EXACTAMENTE
+        # como hasta ahora, fuera de este sistema -- esto no emite ni
+        # aprueba nada clínico, solo avisa que el pedido llegó. Marianela
+        # sigue viendo el pedido en la Bandeja igual que siempre.
+        borrador_respuesta = ACUSE_RECETA
 
     # v0.2.6 (20/08) -- pedido real de Nicolás: un saludo puro ("hola",
     # "buen día", "gracias") no necesita esperar que alguien lo apruebe --
-    # se manda directo, para que la respuesta sea rápida. Única excepción a
-    # la regla de oro de este módulo, y a propósito muy acotada: solo
-    # cuando la IA clasificó 'ambiguo' (no turno/cancelación/receta/
-    # consulta), sin marca de profesional ni urgencia, y sin ninguna acción
-    # de DrApp de por medio. Cualquier otra cosa sigue el camino normal de
-    # aprobación humana. Si el envío en sí falla, se cae al camino de
-    # siempre (queda como borrador para mandar a mano).
-    auto_enviable = (
-        data["clasificacion"] == "ambiguo"
-        and not data["requiere_profesional"]
-        and not data["urgente"]
-        and accion_drapp is None
+    # se manda directo, para que la respuesta sea rápida. v0.2.7 (20/08) --
+    # sumado el acuse de receta (ver arriba): a diferencia del saludo, acá
+    # SÍ se manda aunque requiere_profesional sea true -- lo que se manda
+    # es solo el acuse, nunca una decisión clínica. Cualquier otra cosa
+    # sigue el camino normal de aprobación humana. Si el envío en sí
+    # falla, se cae al camino de siempre (queda como borrador para mandar
+    # a mano).
+    auto_enviable = accion_drapp is None and (
+        (data["clasificacion"] == "ambiguo" and not data["requiere_profesional"] and not data["urgente"])
+        or data["clasificacion"] == "receta"
     )
     if auto_enviable:
         try:

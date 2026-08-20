@@ -293,8 +293,14 @@ class TestGenerarBorrador(unittest.TestCase):
         mock_enviar.assert_not_called()
         self.assertEqual(len(mensajes_whatsapp.list_mensajes("borrador_generado")), 1)
 
+    @patch("twilio_client.enviar_whatsapp")
     @patch("ai_router.clasificar_y_redactar_mensaje")
-    def test_receta_marca_requiere_profesional(self, mock_clasificar):
+    def test_receta_manda_el_acuse_fijo_solo(self, mock_clasificar, mock_enviar):
+        # v0.2.7 (20/08) -- pedido real de Nicolás: el acuse de un pedido de
+        # receta se manda solo, con texto FIJO (no el que arma la IA) --
+        # sigue marcado requiere_profesional=true (fue clínico), pero eso ya
+        # no bloquea el auto-envío del acuse -- la receta en sí sigue
+        # gestionándose fuera de este sistema, como siempre.
         mock_clasificar.return_value = {
             "outcome": "success",
             "data": {
@@ -303,9 +309,33 @@ class TestGenerarBorrador(unittest.TestCase):
             },
         }
         mensaje_id = mensajes_whatsapp.registrar_mensaje_entrante("+5493584390004", "Necesito que me renueves la receta")["id"]
-        mensajes_whatsapp.generar_borrador(mensaje_id)
-        mensajes = mensajes_whatsapp.list_mensajes("borrador_generado")
+        resultado = mensajes_whatsapp.generar_borrador(mensaje_id)
+        self.assertTrue(resultado.get("auto_enviado"))
+        mock_enviar.assert_called_once_with("+5493584390004", mensajes_whatsapp.ACUSE_RECETA)
+
+        mensajes = mensajes_whatsapp.list_mensajes("aprobado_enviado")
+        self.assertEqual(len(mensajes), 1)
         self.assertTrue(mensajes[0]["requiere_profesional"])
+        self.assertEqual(mensajes[0]["resuelto_by"], "sistema")
+        self.assertEqual(mensajes[0]["respuesta_final"], mensajes_whatsapp.ACUSE_RECETA)
+
+    @patch("twilio_client.enviar_whatsapp")
+    @patch("ai_router.clasificar_y_redactar_mensaje")
+    def test_receta_urgente_tambien_manda_el_acuse_solo(self, mock_clasificar, mock_enviar):
+        # A diferencia del saludo puro, el acuse de receta se manda igual
+        # aunque venga marcado urgente -- no compromete nada clínico, y un
+        # pedido urgente se beneficia más todavía de una respuesta rápida.
+        mock_clasificar.return_value = {
+            "outcome": "success",
+            "data": {
+                "clasificacion": "receta", "requiere_profesional": True, "urgente": True,
+                "borrador_respuesta": "irrelevante -- se pisa con el acuse fijo",
+            },
+        }
+        mensaje_id = mensajes_whatsapp.registrar_mensaje_entrante("+5493584390009", "urgente necesito receta")["id"]
+        resultado = mensajes_whatsapp.generar_borrador(mensaje_id)
+        self.assertTrue(resultado.get("auto_enviado"))
+        mock_enviar.assert_called_once_with("+5493584390009", mensajes_whatsapp.ACUSE_RECETA)
 
 
 class TestAprobarYRechazar(unittest.TestCase):
