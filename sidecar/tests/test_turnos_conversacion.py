@@ -95,7 +95,7 @@ class TestOfrecerHorarios(_BaseTemp):
         mock_disp.return_value = {"slots": {}}
         with patch.dict(os.environ, DRAPP_ENV):
             resultado = turnos_conversacion.ofrecer_horarios("+5493584390003")
-        self.assertIn("no encuentro horarios", resultado["texto"].lower())
+        self.assertIn("no tenemos horarios", resultado["texto"].lower())
         self.assertIsNone(resultado["accion"])
         self.assertIsNone(turnos_conversacion.hay_conversacion_activa("+5493584390003"))
 
@@ -138,6 +138,17 @@ class TestProcesarEleccion(_BaseTemp):
         self.assertEqual(conv["drapp_event_id"], "events/nuevo123")
 
     @patch("drapp_client.crear_turno")
+    @patch("drapp_client.buscar_paciente_por_telefono")
+    @patch("ai_router.interpretar_eleccion_turno", return_value={"outcome": "success", "data": {"eleccion": 0}})
+    def test_confirmacion_saluda_por_el_nombre_si_lo_conoce(self, mock_interp, mock_buscar, mock_crear):
+        telefono = self._ofrecer()
+        mock_buscar.return_value = {"id": "consumers/xyz789", "firstName": "María José"}
+        mock_crear.return_value = {"id": "events/x"}
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "el primero")
+        self.assertIn("maría", resultado["texto"].lower())
+
+    @patch("drapp_client.crear_turno")
     @patch("drapp_client.buscar_paciente_por_telefono", return_value={"id": "consumers/xyz789"})
     @patch("ai_router.interpretar_eleccion_turno", return_value={"outcome": "success", "data": {"eleccion": 0}})
     def test_confirmacion_incluye_la_ubicacion_real_que_asigno_drapp(self, mock_interp, mock_buscar, mock_crear):
@@ -165,7 +176,7 @@ class TestProcesarEleccion(_BaseTemp):
         with patch.dict(os.environ, DRAPP_ENV):
             resultado = turnos_conversacion.procesar_eleccion(telefono, "no sé, cualquiera")
 
-        self.assertIn("no pude identificar", resultado["texto"].lower())
+        self.assertIn("no llegué a entender", resultado["texto"].lower())
         self.assertIsNone(resultado["accion"])
         mock_crear.assert_not_called()
         conv = self._conv_de(telefono)

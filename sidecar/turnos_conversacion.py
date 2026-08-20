@@ -81,6 +81,14 @@ def _sin_accion(texto: str) -> dict:
     return {"texto": texto, "accion": None}
 
 
+def _primer_nombre(paciente):
+    """Para saludar por el nombre una vez identificado el paciente --
+    v0.2.6, pedido de Nicolás de que los mensajes sean más cálidos. None si
+    no hay nombre cargado (nunca inventa un saludo con datos que no tiene)."""
+    nombre = ((paciente or {}).get("firstName") or "").strip()
+    return nombre.split(" ")[0] if nombre else None
+
+
 def hay_conversacion_activa(telefono: str):
     conn = db.get_connection()
     row = conn.execute(
@@ -156,17 +164,18 @@ def ofrecer_horarios(telefono: str):
 
     if not opciones:
         return _sin_accion(
-            "Por ahora no encuentro horarios disponibles en los próximos días -- alguien del "
-            "consultorio te va a contactar para coordinar. Consultorio Dr. Nicolás Buso."
+            "¡Hola! 👋 Por ahora no tenemos horarios disponibles para Medicina General en los "
+            "próximos días, pero ya avisamos al consultorio para que se comunique con vos y "
+            "coordinemos. ¡Gracias por tu paciencia! Consultorio Dr. Nicolás Buso."
         )
 
     _crear_conversacion(telefono, tipo="turno_nuevo", estado="esperando_eleccion", opciones=opciones)
 
     lista = "\n".join(f"{i + 1}) {o['label']}" for i, o in enumerate(opciones))
     return _sin_accion(
-        f"Tenemos estos horarios disponibles para Medicina General:\n{lista}\n\n"
-        "Respondé con el número del que te sirva y te confirmamos el turno. "
-        "Consultorio Dr. Nicolás Buso."
+        f"¡Hola! 👋 Estos son los horarios que tenemos disponibles para tu consulta de Medicina "
+        f"General:\n{lista}\n\nRespondé con el número del que te quede mejor y te confirmamos el "
+        "turno enseguida. Consultorio Dr. Nicolás Buso."
     )
 
 
@@ -198,7 +207,7 @@ def _procesar_eleccion_horario(conv, telefono, texto):
     resultado = ai_router.interpretar_eleccion_turno(opciones, texto)
     if resultado["outcome"] != "success" or resultado["data"]["eleccion"] is None:
         return _sin_accion(
-            "No pude identificar cuál de las opciones elegiste -- ¿me confirmás el número "
+            "Uy, no llegué a entender bien cuál elegiste 🤔 ¿me confirmás el número de la opción, "
             "o el horario tal cual te lo mandamos?"
         )
 
@@ -208,13 +217,13 @@ def _procesar_eleccion_horario(conv, telefono, texto):
     try:
         paciente = drapp_client.buscar_paciente_por_telefono(telefono)
     except drapp_client.DrAppAPIError:
-        return _sin_accion("Tuvimos un problema para confirmar tu turno -- alguien del consultorio te va a contactar.")
+        return _sin_accion("Tuvimos un problema para confirmar tu turno -- ya avisamos al consultorio para que se comunique con vos.")
 
     if paciente is None:
         _pedir_identificacion(conv["id"], eleccion_index=eleccion_index)
         return _sin_accion(
-            "No te encuentro en el sistema del consultorio con este número -- pasame tu DNI o tu nombre "
-            "y apellido completo para poder confirmar el turno."
+            "No te encuentro en el sistema con este número, pero no hay problema -- pasame tu DNI o "
+            "tu nombre y apellido completo y confirmamos el turno enseguida."
         )
 
     return _reservar_turno(conv["id"], resource_id, service_key, paciente, elegido)
@@ -226,11 +235,11 @@ def _reservar_turno(conv_id, resource_id, service_key, paciente, elegido):
     except drapp_client.DrAppConflictError:
         _marcar_conversacion(conv_id, "expirado")
         return _sin_accion(
-            f"Uy, justo se ocupó el horario del {elegido['label']} mientras esperábamos tu respuesta -- "
-            "¿querés que te ofrezcamos otros horarios? Escribinos de nuevo pidiendo un turno."
+            f"Uy, justo se ocupó el horario del {elegido['label']} mientras esperábamos tu respuesta 😅 "
+            "¿querés que te busquemos otros horarios? Escribinos de nuevo pidiendo un turno."
         )
     except drapp_client.DrAppAPIError:
-        return _sin_accion("Tuvimos un problema para confirmar tu turno en el sistema -- alguien del consultorio te va a contactar.")
+        return _sin_accion("Tuvimos un problema para confirmar tu turno en el sistema -- ya avisamos al consultorio para que se comunique con vos.")
 
     _marcar_conversacion(conv_id, "confirmado", drapp_event_id=(turno or {}).get("id"))
     # v0.2.6 -- hallazgo real (21/08): la disponibilidad mezcla varios
@@ -242,8 +251,10 @@ def _reservar_turno(conv_id, resource_id, service_key, paciente, elegido):
     ubicacion = (turno or {}).get("location") or {}
     lugar = ubicacion.get("label") or ubicacion.get("address")
     lugar_texto = f", en {lugar}" if lugar else ""
+    nombre = _primer_nombre(paciente)
+    saludo = f"¡Listo, {nombre}! ✅" if nombre else "¡Listo! ✅"
     return {
-        "texto": f"Listo! Tu turno quedó confirmado para el {elegido['label']}{lugar_texto}. Te esperamos. Consultorio Dr. Nicolás Buso.",
+        "texto": f"{saludo} Tu turno quedó confirmado para el {elegido['label']}{lugar_texto}. Te esperamos con gusto. Consultorio Dr. Nicolás Buso.",
         "accion": "turno_creado",
     }
 
@@ -255,12 +266,13 @@ def _procesar_identificacion(conv, texto):
     try:
         candidatos = drapp_client.buscar_pacientes_por_texto(texto)
     except drapp_client.DrAppAPIError:
-        return _sin_accion("Tuvimos un problema para confirmar quién sos -- alguien del consultorio te va a contactar.")
+        return _sin_accion("Tuvimos un problema para confirmar quién sos -- ya avisamos al consultorio para que se comunique con vos.")
 
     if len(candidatos) != 1:
         _marcar_conversacion(conv["id"], "derivado")
         return _sin_accion(
-            "No pude confirmar quién sos con ese dato -- alguien del consultorio te va a contactar directamente."
+            "No pude confirmar quién sos con ese dato -- no te preocupes, ya avisamos al consultorio "
+            "para que se comunique con vos directamente."
         )
     paciente = candidatos[0]
 
@@ -270,7 +282,7 @@ def _procesar_identificacion(conv, texto):
     # tipo == "turno_nuevo"
     cfg = _config()
     if cfg is None:
-        return _sin_accion("Tuvimos un problema técnico para confirmar tu turno -- alguien del consultorio te va a contactar.")
+        return _sin_accion("Tuvimos un problema técnico para confirmar tu turno -- ya avisamos al consultorio para que se comunique con vos.")
     resource_id, service_key = cfg
     opciones = json.loads(conv["opciones_json"])
     elegido = opciones[conv["eleccion_index"]]
@@ -292,13 +304,13 @@ def iniciar_cancelacion(telefono: str):
     try:
         paciente = drapp_client.buscar_paciente_por_telefono(telefono)
     except drapp_client.DrAppAPIError:
-        return _sin_accion("Tuvimos un problema para buscar tu turno -- alguien del consultorio te va a contactar.")
+        return _sin_accion("Tuvimos un problema para buscar tu turno -- ya avisamos al consultorio para que se comunique con vos.")
 
     if paciente is None:
         _crear_conversacion(telefono, tipo="cancelacion", estado="esperando_identificacion")
         return _sin_accion(
-            "No te encuentro en el sistema del consultorio con este número -- pasame tu DNI o tu nombre "
-            "y apellido completo para poder buscar tu turno y cancelarlo."
+            "No te encuentro en el sistema con este número, pero no hay problema -- pasame tu DNI o "
+            "tu nombre y apellido completo y buscamos tu turno para cancelarlo."
         )
 
     return _cancelar_para_paciente(None, paciente)
@@ -308,7 +320,7 @@ def _cancelar_para_paciente(conv_id, paciente):
     try:
         turnos = drapp_client.listar_turnos_de_paciente(paciente["id"])
     except drapp_client.DrAppAPIError:
-        return _sin_accion("Tuvimos un problema para buscar tu turno -- alguien del consultorio te va a contactar.")
+        return _sin_accion("Tuvimos un problema para buscar tu turno -- ya avisamos al consultorio para que se comunique con vos.")
 
     ahora = datetime.datetime.now()
     futuros_medgral = []
@@ -327,11 +339,14 @@ def _cancelar_para_paciente(conv_id, paciente):
     if len(futuros_medgral) == 0:
         if conv_id:
             _marcar_conversacion(conv_id, "derivado")
-        return _sin_accion("No encontré ningún turno de Medicina General a tu nombre para cancelar -- ¿me confirmás la fecha?")
+        return _sin_accion("No encontré ningún turno de Medicina General a tu nombre para cancelar -- ¿me confirmás la fecha, para poder ayudarte?")
     if len(futuros_medgral) > 1:
         if conv_id:
             _marcar_conversacion(conv_id, "derivado")
-        return _sin_accion("Tenés más de un turno agendado -- alguien del consultorio te va a contactar para confirmar cuál cancelar.")
+        return _sin_accion(
+            "Veo que tenés más de un turno agendado -- para no cancelar el que no corresponde, ya "
+            "avisamos al consultorio para que confirme con vos cuál es."
+        )
 
     turno, turno_dt = futuros_medgral[0]
     label = _label_legible(turno["day"], turno["time"])
@@ -341,18 +356,20 @@ def _cancelar_para_paciente(conv_id, paciente):
         if conv_id:
             _marcar_conversacion(conv_id, "derivado")
         return _sin_accion(
-            f"Tu turno del {label} es en menos de 24hs -- para cancelarlo alguien del consultorio "
-            "te va a contactar directamente."
+            f"Tu turno del {label} es en menos de 24hs -- para cancelarlo, alguien del consultorio "
+            "te va a contactar directamente. ¡Gracias por avisar con tiempo!"
         )
 
     try:
         drapp_client.cancelar_turno(turno["id"])
     except drapp_client.DrAppAPIError:
-        return _sin_accion("Tuvimos un problema para cancelar tu turno -- alguien del consultorio te va a contactar.")
+        return _sin_accion("Tuvimos un problema para cancelar tu turno -- ya avisamos al consultorio para que se comunique con vos.")
 
     if conv_id:
         _marcar_conversacion(conv_id, "cancelado", drapp_event_id=turno["id"])
+    nombre = _primer_nombre(paciente)
+    saludo = f"Listo, {nombre} ✅" if nombre else "Listo ✅"
     return {
-        "texto": f"Listo, cancelamos tu turno del {label}. Si querés reprogramar, escribinos cuando quieras. Consultorio Dr. Nicolás Buso.",
+        "texto": f"{saludo} Cancelamos tu turno del {label}. Si querés reprogramar, escribinos cuando quieras -- va a ser un gusto ayudarte. Consultorio Dr. Nicolás Buso.",
         "accion": "turno_cancelado",
     }
