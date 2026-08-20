@@ -98,6 +98,31 @@ class TestOfrecerHorarios(_BaseTemp):
         self.assertEqual(opciones[0]["time"], "10:00")
 
     @patch("drapp_client.consultar_disponibilidad")
+    def test_ignora_horarios_sin_capacidad_real(self, mock_disp):
+        # v0.2.6 (20/08) -- hallazgo real: DrApp devuelve en la grilla TODOS
+        # los horarios del día, ocupados o no -- se llegó a ofrecer (y
+        # crear) un turno a las 11:00 que ya estaba reservado por otro
+        # paciente porque el código tomaba el primer horario de la lista
+        # sin mirar "capacity" (0 = sin lugar, -1 = anómalo/bloqueado).
+        disponibilidad = {
+            "slots": {
+                "2026-08-20": {
+                    "11:00": {"capacity": -1},  # ya reservado / bloqueado
+                    "11:15": {"capacity": 0},   # ocupado
+                    "13:15": {"capacity": 1},   # el único de verdad libre
+                },
+            },
+        }
+        mock_disp.return_value = disponibilidad
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.ofrecer_horarios("+5493584390006")
+        self.assertIsNotNone(resultado)
+        conv = turnos_conversacion.hay_conversacion_activa("+5493584390006")
+        opciones = json.loads(conv["opciones_json"])
+        self.assertEqual(len(opciones), 1)
+        self.assertEqual(opciones[0]["time"], "13:15")
+
+    @patch("drapp_client.consultar_disponibilidad")
     def test_sin_horarios_disponibles_no_crea_conversacion(self, mock_disp):
         mock_disp.return_value = {"slots": {}}
         with patch.dict(os.environ, DRAPP_ENV):
@@ -238,10 +263,16 @@ class TestProcesarEleccion(_BaseTemp):
         ).fetchone())
 
     @patch("drapp_client.crear_turno")
+    @patch("ai_router.clasificar_y_redactar_mensaje")
+    @patch("ai_router.interpretar_preferencia_fecha")
     @patch("ai_router.interpretar_eleccion_turno")
-    def test_ia_no_entiende_no_reserva_nada(self, mock_interp, mock_crear):
+    def test_ia_no_entiende_no_reserva_nada(self, mock_interp, mock_pref, mock_redactar, mock_crear):
         telefono = self._ofrecer()
         mock_interp.return_value = {"outcome": "success", "data": {"eleccion": None}}
+        mock_pref.return_value = {"outcome": "success", "data": {"dias_desde_hoy": None}}
+        # Si la IA tampoco puede redactar un saludo natural (both_failed), el
+        # respaldo sigue siendo la línea fija -- nunca se cuelga sin responder.
+        mock_redactar.return_value = {"outcome": "both_failed", "error": "sin proveedores"}
 
         with patch.dict(os.environ, DRAPP_ENV):
             resultado = turnos_conversacion.procesar_eleccion(telefono, "no sé, cualquiera")
@@ -249,6 +280,32 @@ class TestProcesarEleccion(_BaseTemp):
         self.assertIn("no llegué a entender", resultado["texto"].lower())
         self.assertIsNone(resultado["accion"])
         mock_crear.assert_not_called()
+
+    @patch("ai_router.clasificar_y_redactar_mensaje")
+    @patch("ai_router.interpretar_preferencia_fecha")
+    @patch("ai_router.interpretar_eleccion_turno")
+    def test_saludo_dentro_de_conversacion_activa_lo_redacta_la_ia(self, mock_interp, mock_pref, mock_redactar):
+        # v0.2.6 (20/08) -- pedido real de Nicolás: un "hola" en medio de la
+        # conversación de turno no debería recibir la línea robótica de "no
+        # entendí" -- que la IA redacte algo natural, sin cerrar la oferta.
+        telefono = self._ofrecer()
+        mock_interp.return_value = {"outcome": "success", "data": {"eleccion": None}}
+        mock_pref.return_value = {"outcome": "success", "data": {"dias_desde_hoy": None}}
+        mock_redactar.return_value = {
+            "outcome": "success",
+            "data": {
+                "clasificacion": "ambiguo", "requiere_profesional": False, "urgente": False,
+                "borrador_respuesta": "¡Hola! ¿en qué te puedo ayudar?",
+            },
+        }
+
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "hola buen dia")
+
+        self.assertEqual(resultado["texto"], "¡Hola! ¿en qué te puedo ayudar?")
+        self.assertIsNone(resultado["accion"])
+        conv = self._conv_de(telefono)
+        self.assertEqual(conv["estado"], "esperando_eleccion")  # la oferta sigue en pie
 
     @patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE)
     @patch("ai_router.interpretar_preferencia_fecha", return_value={"outcome": "success", "data": {"dias_desde_hoy": 7}})

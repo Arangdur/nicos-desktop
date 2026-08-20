@@ -198,12 +198,20 @@ def ofrecer_horarios(telefono: str, texto_paciente: str = None):
     slots_por_dia = (disponibilidad or {}).get("slots", {})
     opciones = []
     for dia in sorted(slots_por_dia.keys()):
-        horas = sorted(slots_por_dia[dia].keys())
-        if not horas:
+        # v0.2.6 (20/08) -- hallazgo real: DrApp devuelve en la grilla TODOS
+        # los horarios del día, ocupados o no -- "capacity" es lo que dice
+        # si de verdad hay lugar (0 = sin lugar, negativo = anómalo/
+        # bloqueado, >=1 = libre). Antes se tomaba el primer horario de la
+        # lista sin mirar esto, y se llegó a ofrecer -- y crear -- un turno
+        # que ya estaba reservado por otro paciente en otro consultorio.
+        horas_libres = sorted(
+            h for h, s in slots_por_dia[dia].items() if (s or {}).get("capacity", 0) > 0
+        )
+        if not horas_libres:
             continue
         # Un solo horario por día -- el primero libre de ese día -- en vez
         # de agotar las 3 opciones en el mismo día.
-        opciones.append({"day": dia, "time": horas[0], "label": _label_legible(dia, horas[0])})
+        opciones.append({"day": dia, "time": horas_libres[0], "label": _label_legible(dia, horas_libres[0])})
         if len(opciones) >= CANTIDAD_OPCIONES_A_OFRECER:
             break
 
@@ -262,6 +270,16 @@ def _procesar_eleccion_horario(conv, telefono, texto):
             nueva_oferta = ofrecer_horarios(telefono, texto)
             if nueva_oferta is not None:
                 return nueva_oferta
+        # v0.2.6 (20/08) -- pedido real de Nicolás: si ni es una elección ni
+        # una preferencia de fecha, probablemente sea un saludo o charla
+        # mínima ("hola", "gracias") -- en vez de la línea fija de "no
+        # entendí", que la IA redacte algo natural (mismo clasificador que
+        # usa cualquier mensaje sin conversación activa). La conversación
+        # sigue abierta -- si después responde con el número, se resuelve
+        # igual. Si la IA falla, la línea fija de siempre es el respaldo.
+        redactado = ai_router.clasificar_y_redactar_mensaje(texto)
+        if redactado["outcome"] == "success":
+            return _sin_accion(redactado["data"]["borrador_respuesta"])
         return _sin_accion(
             "Uy, no llegué a entender bien cuál elegiste 🤔 ¿me confirmás el número de la opción, "
             "o el horario tal cual te lo mandamos?"
