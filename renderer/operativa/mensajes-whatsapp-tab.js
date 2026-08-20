@@ -41,7 +41,8 @@ async function loadMensajesWhatsappTabOperativa() {
       <p class="help-text">
         Mensajes de pacientes con un borrador de respuesta ya armado -- revisalo (podés
         editarlo) y aprobalo para que salga, o rechazalo. Los que tocan algo clínico
-        quedan para que los apruebe Nicolás.
+        quedan para que los apruebe Nicolás. Un saludo puro ("hola", "buen día") ya sale
+        solo, sin pasar por acá -- lo vas a ver marcado como enviado.
       </p>
     </div>
     <div id="mensajes-whatsapp-lista-op"></div>
@@ -162,7 +163,7 @@ function _cardMensajeOperativa(m) {
         </div>
       ` : m.estado === 'aprobado_enviado' ? `
         <p style="margin-top:var(--space-2); font-size:13px; color:var(--muted);">
-          Se mandó: "${escHtml(m.respuesta_final)}"
+          ${m.resuelto_by === 'sistema' ? 'Se mandó solo (saludo, sin nada para aprobar)' : 'Se mandó'}: "${escHtml(m.respuesta_final)}"
         </p>
       ` : ''}
     </div>

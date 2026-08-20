@@ -44,7 +44,9 @@ async function loadMensajesWhatsappTab() {
       <h3>Bandeja de WhatsApp</h3>
       <p class="help-text">
         Cada mensaje de un paciente pasa primero por acá — la IA arma un borrador de
-        respuesta, vos lo revisás (editable) y recién ahí se manda. Nada sale solo.
+        respuesta, vos lo revisás (editable) y recién ahí se manda. Única excepción: un
+        saludo puro ("hola", "buen día") se manda directo, para que la respuesta sea rápida
+        — cualquier otra cosa (turno, receta, urgencia, algo clínico) siempre espera tu aprobación.
       </p>
     </div>
     <div id="mensajes-whatsapp-lista"></div>
@@ -173,7 +175,7 @@ function _cardMensaje(m) {
         </div>
       ` : m.estado === 'aprobado_enviado' ? `
         <p style="margin-top:var(--space-2); font-size:13px; color:var(--muted);">
-          Se mandó: "${escHtml(m.respuesta_final)}"
+          ${m.resuelto_by === 'sistema' ? 'Se mandó solo (saludo, sin nada para aprobar)' : 'Se mandó'}: "${escHtml(m.respuesta_final)}"
         </p>
       ` : ''}
     </div>

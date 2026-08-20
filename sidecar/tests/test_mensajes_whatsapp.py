@@ -252,6 +252,47 @@ class TestGenerarBorrador(unittest.TestCase):
         # Estado sin clasificar se trata como requiere_profesional por las dudas.
         self.assertTrue(mensajes[0]["requiere_profesional"])
 
+    @patch("twilio_client.enviar_whatsapp")
+    @patch("ai_router.clasificar_y_redactar_mensaje")
+    def test_saludo_puro_se_manda_solo(self, mock_clasificar, mock_enviar):
+        # v0.2.6 (20/08) -- pedido real de Nicolás: única excepción a "nada
+        # sale sin aprobación" -- un saludo puro (ambiguo, sin
+        # requiere_profesional, sin urgencia, sin acción de DrApp) se manda
+        # directo, para que la respuesta sea rápida.
+        mock_clasificar.return_value = {
+            "outcome": "success",
+            "data": {
+                "clasificacion": "ambiguo", "requiere_profesional": False, "urgente": False,
+                "borrador_respuesta": "¡Hola! ¿en qué te puedo ayudar?",
+            },
+        }
+        mensaje_id = mensajes_whatsapp.registrar_mensaje_entrante("+5493584390005", "hola buen dia")["id"]
+        resultado = mensajes_whatsapp.generar_borrador(mensaje_id)
+        self.assertTrue(resultado["ok"])
+        self.assertTrue(resultado.get("auto_enviado"))
+        mock_enviar.assert_called_once_with("+5493584390005", "¡Hola! ¿en qué te puedo ayudar?")
+
+        mensajes = mensajes_whatsapp.list_mensajes("aprobado_enviado")
+        self.assertEqual(len(mensajes), 1)
+        self.assertEqual(mensajes[0]["resuelto_by"], "sistema")
+        self.assertEqual(mensajes[0]["respuesta_final"], "¡Hola! ¿en qué te puedo ayudar?")
+
+    @patch("twilio_client.enviar_whatsapp")
+    @patch("ai_router.clasificar_y_redactar_mensaje")
+    def test_ambiguo_urgente_no_se_manda_solo(self, mock_clasificar, mock_enviar):
+        mock_clasificar.return_value = {
+            "outcome": "success",
+            "data": {
+                "clasificacion": "ambiguo", "requiere_profesional": False, "urgente": True,
+                "borrador_respuesta": "Ya avisamos al consultorio, te contactan ya mismo.",
+            },
+        }
+        mensaje_id = mensajes_whatsapp.registrar_mensaje_entrante("+5493584390006", "urgente necesito ayuda")["id"]
+        resultado = mensajes_whatsapp.generar_borrador(mensaje_id)
+        self.assertNotIn("auto_enviado", resultado)
+        mock_enviar.assert_not_called()
+        self.assertEqual(len(mensajes_whatsapp.list_mensajes("borrador_generado")), 1)
+
     @patch("ai_router.clasificar_y_redactar_mensaje")
     def test_receta_marca_requiere_profesional(self, mock_clasificar):
         mock_clasificar.return_value = {

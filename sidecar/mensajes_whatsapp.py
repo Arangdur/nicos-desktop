@@ -135,6 +135,41 @@ def generar_borrador(mensaje_id: str) -> dict:
             borrador_respuesta = cancelado["texto"]
             accion_drapp = cancelado["accion"]
 
+    # v0.2.6 (20/08) -- pedido real de Nicolás: un saludo puro ("hola",
+    # "buen día", "gracias") no necesita esperar que alguien lo apruebe --
+    # se manda directo, para que la respuesta sea rápida. Única excepción a
+    # la regla de oro de este módulo, y a propósito muy acotada: solo
+    # cuando la IA clasificó 'ambiguo' (no turno/cancelación/receta/
+    # consulta), sin marca de profesional ni urgencia, y sin ninguna acción
+    # de DrApp de por medio. Cualquier otra cosa sigue el camino normal de
+    # aprobación humana. Si el envío en sí falla, se cae al camino de
+    # siempre (queda como borrador para mandar a mano).
+    auto_enviable = (
+        data["clasificacion"] == "ambiguo"
+        and not data["requiere_profesional"]
+        and not data["urgente"]
+        and accion_drapp is None
+    )
+    if auto_enviable:
+        try:
+            twilio_client.enviar_whatsapp(row["telefono"], borrador_respuesta)
+        except (twilio_client.TwilioConfigError, twilio_client.TwilioSendError):
+            auto_enviable = False
+
+    if auto_enviable:
+        conn.execute(
+            "UPDATE mensajes_whatsapp_entrantes SET "
+            "clasificacion = ?, requiere_profesional = ?, urgente = ?, borrador_respuesta = ?, "
+            "respuesta_final = ?, accion_drapp = ?, estado = 'aprobado_enviado', "
+            "borrador_generado_at = ?, resuelto_at = ?, resuelto_by = 'sistema' WHERE id = ?",
+            (
+                data["clasificacion"], int(data["requiere_profesional"]), int(data["urgente"]),
+                borrador_respuesta, borrador_respuesta, accion_drapp, now, now, mensaje_id,
+            ),
+        )
+        conn.commit()
+        return {"ok": True, "clasificacion": data["clasificacion"], "auto_enviado": True}
+
     conn.execute(
         "UPDATE mensajes_whatsapp_entrantes SET "
         "clasificacion = ?, requiere_profesional = ?, urgente = ?, borrador_respuesta = ?, "
