@@ -196,6 +196,19 @@ def buscar_paciente_por_telefono(telefono: str):
     return pacientes[0] if pacientes else None
 
 
+def buscar_pacientes_por_texto(query: str) -> list:
+    """Búsqueda fuzzy por nombre, apellido o DNI (`q` en el spec real -- un
+    solo parámetro busca los tres). Devuelve TODOS los que matchean, sin
+    filtrar a uno solo -- quien llama decide qué hacer si hay 0 o más de 1
+    (nunca asumir cuál es el correcto). v0.2.6, Fase C: fallback cuando el
+    teléfono no identificó a nadie."""
+    _, team_id = _config()
+    query = (query or "").strip()
+    if not query:
+        return []
+    return _request("GET", f"/teams/{team_id}/consumers", params={"q": query}) or []
+
+
 def get_telefono_paciente(consumer_id: str):
     """Devuelve el primer teléfono cargado, o None -- nunca inventa un número."""
     _, team_id = _config()

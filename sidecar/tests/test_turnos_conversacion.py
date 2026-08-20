@@ -173,13 +173,66 @@ class TestProcesarEleccion(_BaseTemp):
     @patch("drapp_client.crear_turno")
     @patch("drapp_client.buscar_paciente_por_telefono", return_value=None)
     @patch("ai_router.interpretar_eleccion_turno", return_value={"outcome": "success", "data": {"eleccion": 0}})
-    def test_paciente_no_encontrado_deriva_no_crea_paciente(self, mock_interp, mock_buscar, mock_crear):
+    def test_paciente_no_encontrado_por_telefono_pide_identificacion(self, mock_interp, mock_buscar, mock_crear):
         telefono = self._ofrecer()
         with patch.dict(os.environ, DRAPP_ENV):
             resultado = turnos_conversacion.procesar_eleccion(telefono, "el primero")
-        self.assertIn("no te encuentro", resultado["texto"].lower())
+        self.assertIn("dni", resultado["texto"].lower())
         self.assertIsNone(resultado["accion"])
         mock_crear.assert_not_called()
+        conv = self._conv_de(telefono)
+        self.assertEqual(conv["estado"], "esperando_identificacion")
+        self.assertEqual(conv["eleccion_index"], 0)  # recuerda qué había elegido
+
+    @patch("drapp_client.crear_turno")
+    @patch("drapp_client.buscar_pacientes_por_texto")
+    @patch("drapp_client.buscar_paciente_por_telefono", return_value=None)
+    @patch("ai_router.interpretar_eleccion_turno", return_value={"outcome": "success", "data": {"eleccion": 1}})
+    def test_identificacion_con_match_unico_reserva_el_turno_recordado(self, mock_interp, mock_buscar_tel, mock_buscar_texto, mock_crear):
+        telefono = self._ofrecer()
+        with patch.dict(os.environ, DRAPP_ENV):
+            turnos_conversacion.procesar_eleccion(telefono, "el segundo")  # pide identificación
+
+        mock_buscar_texto.return_value = [{"id": "consumers/dni12345678"}]
+        mock_crear.return_value = {"id": "events/nuevo456"}
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "40123456")
+
+        self.assertEqual(resultado["accion"], "turno_creado")
+        mock_crear.assert_called_once_with(
+            "resources/8c8a2304", "pms_specialties:medicina-general/pms_practices:consulta",
+            "consumers/dni12345678", "2026-08-20", "10:10",  # la opción de índice 1, recordada
+        )
+        conv = self._conv_de(telefono)
+        self.assertEqual(conv["estado"], "confirmado")
+
+    @patch("drapp_client.buscar_pacientes_por_texto")
+    @patch("drapp_client.buscar_paciente_por_telefono", return_value=None)
+    @patch("ai_router.interpretar_eleccion_turno", return_value={"outcome": "success", "data": {"eleccion": 0}})
+    def test_identificacion_con_dos_matches_deriva_no_adivina(self, mock_interp, mock_buscar_tel, mock_buscar_texto):
+        telefono = self._ofrecer()
+        with patch.dict(os.environ, DRAPP_ENV):
+            turnos_conversacion.procesar_eleccion(telefono, "el primero")
+
+        mock_buscar_texto.return_value = [{"id": "consumers/juan-perez-1"}, {"id": "consumers/juan-perez-2"}]
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "Juan Pérez")
+
+        self.assertIn("no pude confirmar", resultado["texto"].lower())
+        self.assertIsNone(resultado["accion"])
+        conv = self._conv_de(telefono)
+        self.assertEqual(conv["estado"], "derivado")
+
+    @patch("drapp_client.buscar_pacientes_por_texto", return_value=[])
+    @patch("drapp_client.buscar_paciente_por_telefono", return_value=None)
+    @patch("ai_router.interpretar_eleccion_turno", return_value={"outcome": "success", "data": {"eleccion": 0}})
+    def test_identificacion_sin_matches_deriva(self, mock_interp, mock_buscar_tel, mock_buscar_texto):
+        telefono = self._ofrecer()
+        with patch.dict(os.environ, DRAPP_ENV):
+            turnos_conversacion.procesar_eleccion(telefono, "el primero")
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "no sé mi dni")
+        self.assertIn("no pude confirmar", resultado["texto"].lower())
         conv = self._conv_de(telefono)
         self.assertEqual(conv["estado"], "derivado")
 
@@ -191,11 +244,46 @@ class TestIniciarCancelacion(_BaseTemp):
         self.assertIsNone(turnos_conversacion.iniciar_cancelacion("+5493584390020"))
 
     @patch("drapp_client.buscar_paciente_por_telefono", return_value=None)
-    def test_paciente_no_encontrado_deriva(self, mock_buscar):
+    def test_paciente_no_encontrado_por_telefono_pide_identificacion(self, mock_buscar):
+        telefono = "+5493584390021"
         with patch.dict(os.environ, DRAPP_ENV):
-            resultado = turnos_conversacion.iniciar_cancelacion("+5493584390021")
+            resultado = turnos_conversacion.iniciar_cancelacion(telefono)
         self.assertIn("no te encuentro", resultado["texto"].lower())
         self.assertIsNone(resultado["accion"])
+        conv = self._conv_de(telefono)
+        self.assertEqual(conv["estado"], "esperando_identificacion")
+        self.assertEqual(conv["tipo"], "cancelacion")
+
+    def _conv_de(self, telefono):
+        conn = db.get_connection()
+        return dict(conn.execute(
+            "SELECT * FROM turnos_conversacion WHERE telefono = ? ORDER BY creado_at DESC LIMIT 1", (telefono,)
+        ).fetchone())
+
+    @patch("drapp_client.cancelar_turno")
+    @patch("drapp_client.listar_turnos_de_paciente")
+    @patch("drapp_client.buscar_pacientes_por_texto")
+    @patch("drapp_client.buscar_paciente_por_telefono", return_value=None)
+    def test_identificacion_de_cancelacion_con_match_unico_cancela(self, mock_buscar_tel, mock_buscar_texto, mock_listar, mock_cancelar):
+        import datetime
+        telefono = "+5493584390027"
+        with patch.dict(os.environ, DRAPP_ENV):
+            turnos_conversacion.iniciar_cancelacion(telefono)  # pide identificación
+
+        en_3_dias = datetime.datetime.now() + datetime.timedelta(days=3)
+        mock_buscar_texto.return_value = [{"id": "consumers/dni40123456"}]
+        mock_listar.return_value = [{
+            "id": "events/abc", "status": "booked",
+            "service": {"label": "Medicina General / Consulta"},
+            "day": en_3_dias.strftime("%Y-%m-%d"), "time": en_3_dias.strftime("%H:%M"),
+        }]
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "40123456")
+
+        self.assertEqual(resultado["accion"], "turno_cancelado")
+        mock_cancelar.assert_called_once_with("events/abc")
+        conv = self._conv_de(telefono)
+        self.assertEqual(conv["estado"], "cancelado")
 
     @patch("drapp_client.listar_turnos_de_paciente", return_value=[])
     @patch("drapp_client.buscar_paciente_por_telefono", return_value={"id": "consumers/x"})

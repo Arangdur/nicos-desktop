@@ -1,7 +1,7 @@
 """
 Fase C -- motor de reserva y cancelación de turnos de Medicina General por
 WhatsApp. Conversación de varios mensajes con estado guardado en
-turnos_conversacion (ver migración 013). Nunca inventa un horario ni
+turnos_conversacion (ver migraciones 013/015). Nunca inventa un horario ni
 reserva/cancela nada sin que el paciente lo haya confirmado por escrito,
 contra datos REALES consultados en vivo a DrApp -- ver ai_router.
 interpretar_eleccion_turno, que solo puede elegir un índice de una lista
@@ -15,13 +15,21 @@ cualquier otro mensaje (ver mensajes_whatsapp.aprobar_y_enviar). Este
 módulo nunca manda nada por Twilio directamente -- solo devuelve lo que
 mensajes_whatsapp.py guarda como borrador_respuesta.
 
+v0.2.6 (21/08) -- fallback de identificación: buscar solo por teléfono no
+alcanza (un paciente puede escribirle al consultorio desde un número que
+no es el que tiene cargado en DrApp). Si el teléfono no matchea a nadie,
+se le pide DNI o nombre completo -- y solo se sigue adelante si eso
+matchea EXACTAMENTE UN paciente (`drapp_client.buscar_pacientes_por_texto`,
+fuzzy). Con 0 o 2+ resultados, se deriva a una persona -- nunca se adivina
+entre pacientes con nombre parecido. Un solo intento: si tampoco identifica
+a nadie así, deriva directo (no queda pidiendo datos indefinidamente).
+
 Cada función pública devuelve `None` (nada que hacer -- DrApp no está
 configurado, o no hay conversación activa; el caller usa su respaldo
 genérico) o un dict `{"texto": str, "accion": None|"turno_creado"|"turno_cancelado"}`.
 `accion` es None salvo que este llamado haya efectivamente creado o
 cancelado un turno real en DrApp -- Marianela/Nicolás lo ven como un tag
-distinto en la Bandeja (ver mensajes-whatsapp-tab.js) para no confundir
-"esto es solo un borrador" con "esto ya pasó de verdad, esto solo avisa".
+distinto en la Bandeja (ver mensajes-whatsapp-tab.js).
 
 Config (Ajustes -> DrApp): DRAPP_RESOURCE_ID y
 DRAPP_SERVICE_KEY_MEDICINA_GENERAL -- identifican a Nicolás como recurso y
@@ -76,11 +84,26 @@ def _sin_accion(texto: str) -> dict:
 def hay_conversacion_activa(telefono: str):
     conn = db.get_connection()
     row = conn.execute(
-        "SELECT * FROM turnos_conversacion WHERE telefono = ? AND estado = 'esperando_eleccion' "
+        "SELECT * FROM turnos_conversacion WHERE telefono = ? "
+        "AND estado IN ('esperando_eleccion', 'esperando_identificacion') "
         "ORDER BY creado_at DESC LIMIT 1",
         (telefono,),
     ).fetchone()
     return dict(row) if row else None
+
+
+def _crear_conversacion(telefono, tipo, estado, opciones=None, eleccion_index=None):
+    conn = db.get_connection()
+    now = _now_iso()
+    conv_id = secrets.token_hex(8)
+    conn.execute(
+        "INSERT INTO turnos_conversacion "
+        "(id, telefono, tipo, estado, opciones_json, eleccion_index, creado_at, actualizado_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (conv_id, telefono, tipo, estado, json.dumps(opciones) if opciones is not None else None, eleccion_index, now, now),
+    )
+    conn.commit()
+    return conv_id
 
 
 def _marcar_conversacion(conv_id, estado, drapp_event_id=None):
@@ -92,12 +115,20 @@ def _marcar_conversacion(conv_id, estado, drapp_event_id=None):
     conn.commit()
 
 
+def _pedir_identificacion(conv_id, eleccion_index=None):
+    conn = db.get_connection()
+    conn.execute(
+        "UPDATE turnos_conversacion SET estado = 'esperando_identificacion', eleccion_index = ?, actualizado_at = ? WHERE id = ?",
+        (eleccion_index, _now_iso(), conv_id),
+    )
+    conn.commit()
+
+
 def ofrecer_horarios(telefono: str):
     """Consulta disponibilidad real y arma el texto del borrador con hasta
     `CANTIDAD_OPCIONES_A_OFRECER` opciones reales. `accion` siempre None
     acá -- ofrecer horarios nunca ejecuta nada en DrApp por sí solo. None
-    (no dict) si DrApp no está configurado o la consulta falla -- ver nota
-    de respaldo en el docstring del módulo."""
+    (no dict) si DrApp no está configurado o la consulta falla."""
     cfg = _config()
     if cfg is None:
         return None
@@ -129,15 +160,7 @@ def ofrecer_horarios(telefono: str):
             "consultorio te va a contactar para coordinar. Consultorio Dr. Nicolás Buso."
         )
 
-    conn = db.get_connection()
-    now = _now_iso()
-    conv_id = secrets.token_hex(8)
-    conn.execute(
-        "INSERT INTO turnos_conversacion (id, telefono, estado, opciones_json, creado_at, actualizado_at) "
-        "VALUES (?, ?, 'esperando_eleccion', ?, ?, ?)",
-        (conv_id, telefono, json.dumps(opciones), now, now),
-    )
-    conn.commit()
+    _crear_conversacion(telefono, tipo="turno_nuevo", estado="esperando_eleccion", opciones=opciones)
 
     lista = "\n".join(f"{i + 1}) {o['label']}" for i, o in enumerate(opciones))
     return _sin_accion(
@@ -148,18 +171,22 @@ def ofrecer_horarios(telefono: str):
 
 
 def procesar_eleccion(telefono: str, texto: str):
-    """Interpreta la respuesta del paciente contra la conversación activa
-    de ESE teléfono. Si matchea con claridad, CREA el turno de verdad en
-    DrApp (automático, ver nota de diseño arriba) y devuelve
-    `accion: "turno_creado"`. En cualquier otro desenlace (no se entendió,
-    conflicto, paciente no encontrado, error) `accion` es None -- no pasó
-    nada real, solo se le pide algo al paciente o se deriva. None (no
-    dict) si no hay conversación activa -- el caller sigue el camino
-    normal de clasificación en ese caso."""
+    """Punto de entrada único para cualquier respuesta dentro de una
+    conversación activa (elegir un horario, o dar DNI/nombre cuando se
+    pidió identificación) -- despacha según el estado real de la
+    conversación. None (no dict) si no hay conversación activa -- el
+    caller sigue el camino normal de clasificación en ese caso."""
     conv = hay_conversacion_activa(telefono)
     if conv is None:
         return None
 
+    if conv["estado"] == "esperando_identificacion":
+        return _procesar_identificacion(conv, texto)
+
+    return _procesar_eleccion_horario(conv, telefono, texto)
+
+
+def _procesar_eleccion_horario(conv, telefono, texto):
     cfg = _config()
     if cfg is None:
         # No debería pasar (si se pudo ofrecer, DrApp estaba configurado),
@@ -175,7 +202,8 @@ def procesar_eleccion(telefono: str, texto: str):
             "o el horario tal cual te lo mandamos?"
         )
 
-    elegido = opciones[resultado["data"]["eleccion"]]
+    eleccion_index = resultado["data"]["eleccion"]
+    elegido = opciones[eleccion_index]
 
     try:
         paciente = drapp_client.buscar_paciente_por_telefono(telefono)
@@ -183,18 +211,20 @@ def procesar_eleccion(telefono: str, texto: str):
         return _sin_accion("Tuvimos un problema para confirmar tu turno -- alguien del consultorio te va a contactar.")
 
     if paciente is None:
-        # Nunca se crea un paciente nuevo desde acá -- eso queda para una
-        # persona, no es algo que este bot deba decidir solo.
-        _marcar_conversacion(conv["id"], "derivado")
+        _pedir_identificacion(conv["id"], eleccion_index=eleccion_index)
         return _sin_accion(
-            "No te encuentro en el sistema del consultorio con este número -- alguien te va "
-            "a contactar para coordinar el turno directamente."
+            "No te encuentro en el sistema del consultorio con este número -- pasame tu DNI o tu nombre "
+            "y apellido completo para poder confirmar el turno."
         )
 
+    return _reservar_turno(conv["id"], resource_id, service_key, paciente, elegido)
+
+
+def _reservar_turno(conv_id, resource_id, service_key, paciente, elegido):
     try:
         turno = drapp_client.crear_turno(resource_id, service_key, paciente["id"], elegido["day"], elegido["time"])
     except drapp_client.DrAppConflictError:
-        _marcar_conversacion(conv["id"], "expirado")
+        _marcar_conversacion(conv_id, "expirado")
         return _sin_accion(
             f"Uy, justo se ocupó el horario del {elegido['label']} mientras esperábamos tu respuesta -- "
             "¿querés que te ofrezcamos otros horarios? Escribinos de nuevo pidiendo un turno."
@@ -202,22 +232,50 @@ def procesar_eleccion(telefono: str, texto: str):
     except drapp_client.DrAppAPIError:
         return _sin_accion("Tuvimos un problema para confirmar tu turno en el sistema -- alguien del consultorio te va a contactar.")
 
-    _marcar_conversacion(conv["id"], "confirmado", drapp_event_id=(turno or {}).get("id"))
+    _marcar_conversacion(conv_id, "confirmado", drapp_event_id=(turno or {}).get("id"))
     return {
         "texto": f"Listo! Tu turno quedó confirmado para el {elegido['label']}. Te esperamos. Consultorio Dr. Nicolás Buso.",
         "accion": "turno_creado",
     }
 
 
+def _procesar_identificacion(conv, texto):
+    """El paciente ya mandó su DNI o nombre completo -- un solo intento:
+    si no matchea a exactamente una persona, se deriva directo (nunca
+    queda pidiendo datos indefinidamente ni adivina entre varias)."""
+    try:
+        candidatos = drapp_client.buscar_pacientes_por_texto(texto)
+    except drapp_client.DrAppAPIError:
+        return _sin_accion("Tuvimos un problema para confirmar quién sos -- alguien del consultorio te va a contactar.")
+
+    if len(candidatos) != 1:
+        _marcar_conversacion(conv["id"], "derivado")
+        return _sin_accion(
+            "No pude confirmar quién sos con ese dato -- alguien del consultorio te va a contactar directamente."
+        )
+    paciente = candidatos[0]
+
+    if conv["tipo"] == "cancelacion":
+        return _cancelar_para_paciente(conv["id"], paciente)
+
+    # tipo == "turno_nuevo"
+    cfg = _config()
+    if cfg is None:
+        return _sin_accion("Tuvimos un problema técnico para confirmar tu turno -- alguien del consultorio te va a contactar.")
+    resource_id, service_key = cfg
+    opciones = json.loads(conv["opciones_json"])
+    elegido = opciones[conv["eleccion_index"]]
+    return _reservar_turno(conv["id"], resource_id, service_key, paciente, elegido)
+
+
 def iniciar_cancelacion(telefono: str):
     """Busca el turno de Medicina General más próximo del paciente. Con
-    24hs o más de anticipación, CANCELA automáticamente (mismo criterio de
-    diseño que confirmar un turno nuevo) y devuelve `accion:
-    "turno_cancelado"`. Con menos de 24hs, o si hay cualquier ambigüedad (0
-    turnos futuros, o más de uno), deriva a una persona sin tocar nada
-    (`accion` None) -- nunca cancela algo que no esté clarísimo.
-    Psiquiatría queda afuera a propósito, tiene su propio manejo en
-    DrApp. None (no dict) si DrApp no está configurado."""
+    24hs o más de anticipación, CANCELA automáticamente y devuelve
+    `accion: "turno_cancelado"`. Con menos de 24hs, o si hay cualquier
+    ambigüedad (0 turnos futuros, o más de uno), deriva a una persona sin
+    tocar nada -- nunca cancela algo que no esté clarísimo. Psiquiatría
+    queda afuera a propósito, tiene su propio manejo en DrApp. None (no
+    dict) si DrApp no está configurado."""
     cfg = _config()
     if cfg is None:
         return None
@@ -228,11 +286,16 @@ def iniciar_cancelacion(telefono: str):
         return _sin_accion("Tuvimos un problema para buscar tu turno -- alguien del consultorio te va a contactar.")
 
     if paciente is None:
+        _crear_conversacion(telefono, tipo="cancelacion", estado="esperando_identificacion")
         return _sin_accion(
-            "No te encuentro en el sistema del consultorio con este número -- alguien te va "
-            "a contactar para coordinar la cancelación directamente."
+            "No te encuentro en el sistema del consultorio con este número -- pasame tu DNI o tu nombre "
+            "y apellido completo para poder buscar tu turno y cancelarlo."
         )
 
+    return _cancelar_para_paciente(None, paciente)
+
+
+def _cancelar_para_paciente(conv_id, paciente):
     try:
         turnos = drapp_client.listar_turnos_de_paciente(paciente["id"])
     except drapp_client.DrAppAPIError:
@@ -253,8 +316,12 @@ def iniciar_cancelacion(telefono: str):
             futuros_medgral.append((t, turno_dt))
 
     if len(futuros_medgral) == 0:
+        if conv_id:
+            _marcar_conversacion(conv_id, "derivado")
         return _sin_accion("No encontré ningún turno de Medicina General a tu nombre para cancelar -- ¿me confirmás la fecha?")
     if len(futuros_medgral) > 1:
+        if conv_id:
+            _marcar_conversacion(conv_id, "derivado")
         return _sin_accion("Tenés más de un turno agendado -- alguien del consultorio te va a contactar para confirmar cuál cancelar.")
 
     turno, turno_dt = futuros_medgral[0]
@@ -262,6 +329,8 @@ def iniciar_cancelacion(telefono: str):
     horas_hasta = (turno_dt - ahora).total_seconds() / 3600
 
     if horas_hasta < VENTANA_CANCELACION_HORAS:
+        if conv_id:
+            _marcar_conversacion(conv_id, "derivado")
         return _sin_accion(
             f"Tu turno del {label} es en menos de 24hs -- para cancelarlo alguien del consultorio "
             "te va a contactar directamente."
@@ -272,6 +341,8 @@ def iniciar_cancelacion(telefono: str):
     except drapp_client.DrAppAPIError:
         return _sin_accion("Tuvimos un problema para cancelar tu turno -- alguien del consultorio te va a contactar.")
 
+    if conv_id:
+        _marcar_conversacion(conv_id, "cancelado", drapp_event_id=turno["id"])
     return {
         "texto": f"Listo, cancelamos tu turno del {label}. Si querés reprogramar, escribinos cuando quieras. Consultorio Dr. Nicolás Buso.",
         "accion": "turno_cancelado",
