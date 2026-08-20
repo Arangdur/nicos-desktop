@@ -240,10 +240,19 @@ def get_telefono_paciente(consumer_id: str):
 
 
 def listar_turnos_de_paciente(consumer_id: str):
-    """Historial completo de turnos de un paciente (todos los estados,
-    todas las especialidades) -- filtrar por 'status'/'type'/especialidad
-    es responsabilidad de quien llama, igual que list_turnos_medicina_general.
-    v0.2.6, Fase C (cancelación por WhatsApp)."""
+    """Turnos futuros de un paciente (todos los estados, todas las
+    especialidades) -- filtrar por 'status'/'type'/especialidad es
+    responsabilidad de quien llama, igual que list_turnos_medicina_general.
+    v0.2.6, Fase C (cancelación por WhatsApp).
+
+    v0.2.7 (20/08) -- hallazgo real: la forma real es
+    {"next": [...], "past": [...]}, no un array directo como se había
+    asumido sin poder probarlo contra la API real -- iterar directo sobre
+    la respuesta terminaba iterando las CLAVES del dict ("next"/"past",
+    strings) en vez de los turnos, y explotaba (AttributeError) apenas un
+    paciente real tenía algo cargado. Solo interesa "next" acá -- no se
+    puede cancelar un turno que ya pasó."""
     _, team_id = _config()
     consumer_id = _strip_prefix(consumer_id, "consumers/")
-    return _request("GET", f"/teams/{team_id}/consumers/{consumer_id}/events") or []
+    resultado = _request("GET", f"/teams/{team_id}/consumers/{consumer_id}/events") or {}
+    return resultado.get("next", [])

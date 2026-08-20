@@ -158,6 +158,35 @@ class TestDisponibilidadYTurnos(unittest.TestCase):
         self.assertEqual(turnos[0]["id"], "events/1")
 
 
+class TestListarTurnosDePaciente(unittest.TestCase):
+    def setUp(self):
+        self.env_patch = patch.dict(os.environ, {"DRAPP_API_KEY": "drapp_sandbox_x", "DRAPP_TEAM_ID": "clinica-norte"})
+        self.env_patch.start()
+
+    def tearDown(self):
+        self.env_patch.stop()
+
+    @patch("drapp_client.urllib.request.urlopen")
+    def test_devuelve_solo_los_turnos_futuros_de_next(self, mock_urlopen):
+        # v0.2.7 (20/08) -- hallazgo real: la forma real de
+        # /consumers/{id}/events es {"next": [...], "past": [...]}, no un
+        # array directo -- iterar la respuesta tal cual terminaba iterando
+        # las CLAVES del dict (strings), y explotaba (AttributeError)
+        # apenas un paciente real tenía algo cargado.
+        mock_urlopen.return_value = _fake_response({
+            "next": [{"id": "events/futuro", "status": "booked"}],
+            "past": [{"id": "events/viejo", "status": "fulfilled"}],
+        })
+        turnos = drapp_client.listar_turnos_de_paciente("consumers/b07bd789")
+        self.assertEqual(turnos, [{"id": "events/futuro", "status": "booked"}])
+
+    @patch("drapp_client.urllib.request.urlopen")
+    def test_sin_turnos_devuelve_lista_vacia(self, mock_urlopen):
+        mock_urlopen.return_value = _fake_response({"next": [], "past": []})
+        turnos = drapp_client.listar_turnos_de_paciente("consumers/b07bd789")
+        self.assertEqual(turnos, [])
+
+
 class TestPacientes(unittest.TestCase):
     def setUp(self):
         self.env_patch = patch.dict(os.environ, {"DRAPP_API_KEY": "drapp_sandbox_x", "DRAPP_TEAM_ID": "clinica-norte"})
