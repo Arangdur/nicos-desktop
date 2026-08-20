@@ -843,6 +843,142 @@ def interpretar_eleccion_turno(opciones: list, texto: str, provider: str = None)
     return {"outcome": "both_failed", "error": combined_error, "attempts": attempts}
 
 
+# v0.2.6 (21/08) -- Fase C: preferencia de fecha del paciente al pedir un
+# turno ("para la semana que viene", "lo antes posible"). Igual criterio de
+# seguridad que interpretar_eleccion_turno -- la IA NUNCA calcula una fecha
+# de calendario ella misma (no sabe qué día es hoy con certeza ni qué día
+# de la semana cae tal fecha), solo devuelve un número de días desde hoy
+# (0-60) que el código combina con datetime.now() real. El peor caso
+# posible es un número de días un poco desacertado, nunca una fecha
+# inventada o mal calculada.
+
+PREFERENCIA_FECHA_SYSTEM_PROMPT = """Un paciente le escribió al consultorio pidiendo un turno, o \
+respondiendo que ninguno de los horarios ofrecidos le sirve. Tu única tarea es extraer, si lo \
+mencionó, a partir de cuántos DÍAS DESDE HOY debería buscarse un horario para él.
+
+Ejemplos:
+- "quiero un turno" (sin mencionar fecha) -> dias_desde_hoy: null (sin preferencia)
+- "necesito un turno lo antes posible" / "urgente" -> dias_desde_hoy: 0
+- "para la semana que viene" -> dias_desde_hoy: 7
+- "para dentro de 10 días" -> dias_desde_hoy: 10
+- "para el mes que viene" -> dias_desde_hoy: 30
+- "¿no tenés para más adelante?" / "¿otro día?" (sin precisar cuánto) -> dias_desde_hoy: 7
+
+NUNCA calcules una fecha de calendario vos mismo (no sabés con certeza qué día de la semana cae \
+qué fecha) -- solo devolvés un número de días desde hoy, entre 0 y 60. Si el texto no menciona \
+ninguna preferencia de fecha (solo pide un turno sin más, o elige uno de los horarios ya \
+ofrecidos), `dias_desde_hoy` es null."""
+
+PREFERENCIA_FECHA_JSON_SCHEMA = {
+    "name": "preferencia_fecha_turno",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "dias_desde_hoy": {"type": ["integer", "null"]},
+        },
+        "required": ["dias_desde_hoy"],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
+
+def _validate_preferencia_fecha_shape(data):
+    if not isinstance(data, dict):
+        return f"la respuesta no es un objeto JSON (vino {type(data).__name__})"
+    if "dias_desde_hoy" not in data:
+        return "falta el campo 'dias_desde_hoy'"
+    dias = data["dias_desde_hoy"]
+    if dias is not None and (not isinstance(dias, int) or isinstance(dias, bool) or not (0 <= dias <= 60)):
+        return f"'dias_desde_hoy' fuera de rango: {dias!r} (esperado 0..60 o null)"
+    return None
+
+
+def _try_interpretar_preferencia_fecha(provider_name: str, texto: str) -> dict:
+    if provider_name == "openai":
+        client = _get_openai_client()
+        if client is None:
+            return {"status": "auth_error", "provider": "openai", "error": _openai_error}
+        try:
+            resp = client.chat.completions.create(
+                model=os.getenv("OPENAI_MODEL", "gpt-5"),
+                messages=[
+                    {"role": "system", "content": PREFERENCIA_FECHA_SYSTEM_PROMPT},
+                    {"role": "user", "content": texto},
+                ],
+                response_format={"type": "json_schema", "json_schema": PREFERENCIA_FECHA_JSON_SCHEMA},
+            )
+            raw_content = resp.choices[0].message.content
+            try:
+                data = json.loads(raw_content)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"status": "malformed", "provider": "openai", "error": f"JSON inválido: {e}"}
+        except Exception as e:
+            status = "auth_error" if _classify_exception(e) == "auth" else "transient_error"
+            return {"status": status, "provider": "openai", "error": f"{type(e).__name__}: {e}"}
+    else:
+        client = _get_claude_client()
+        if client is None:
+            return {"status": "auth_error", "provider": "claude", "error": _claude_error}
+        try:
+            resp = client.messages.create(
+                model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5"),
+                max_tokens=200,
+                system=PREFERENCIA_FECHA_SYSTEM_PROMPT,
+                tools=[{
+                    "name": "preferencia_fecha_turno",
+                    "description": "Días desde hoy a partir de los cuales buscar un horario, si el paciente lo mencionó.",
+                    "input_schema": PREFERENCIA_FECHA_JSON_SCHEMA["schema"],
+                }],
+                tool_choice={"type": "tool", "name": "preferencia_fecha_turno"},
+                messages=[{"role": "user", "content": texto}],
+            )
+            tool_block = next((b for b in resp.content if b.type == "tool_use"), None)
+            if tool_block is None:
+                return {"status": "malformed", "provider": "claude", "error": "la respuesta no incluyó el tool_use esperado"}
+            data = tool_block.input
+        except Exception as e:
+            status = "auth_error" if _classify_exception(e) == "auth" else "transient_error"
+            return {"status": status, "provider": "claude", "error": f"{type(e).__name__}: {e}"}
+
+    shape_error = _validate_preferencia_fecha_shape(data)
+    if shape_error:
+        return {"status": "malformed", "provider": provider_name, "error": shape_error}
+    return {"status": "success", "provider": provider_name, "data": data}
+
+
+def interpretar_preferencia_fecha(texto: str, provider: str = None) -> dict:
+    """Mismo contrato 'outcome' que el resto del router. `data['dias_desde_hoy']`
+    es un entero 0..60, o None si no se mencionó ninguna preferencia."""
+    provider = provider or get_provider_for("interpretar_preferencia_fecha", default="claude")
+    alternate = "claude" if provider == "openai" else "openai"
+
+    attempts = []
+    first = _try_interpretar_preferencia_fecha(provider, texto)
+    attempts.append(first)
+
+    if first["status"] == "success":
+        return {"outcome": "success", "data": first["data"], "provider": provider, "attempts": attempts}
+
+    if first["status"] == "auth_error":
+        return {"outcome": "auth_error", "provider": provider, "error": first["error"], "attempts": attempts}
+
+    if not get_provider_matrix().get("fallback_on_primary_failure", True):
+        return {"outcome": "both_failed", "error": first["error"], "attempts": attempts}
+
+    second = _try_interpretar_preferencia_fecha(alternate, texto)
+    attempts.append(second)
+
+    if second["status"] == "success":
+        return {
+            "outcome": "success", "data": second["data"], "provider": alternate,
+            "fell_back_from": provider, "attempts": attempts,
+        }
+
+    combined_error = f"{provider}: {first['error']} | {alternate}: {second['error']}"
+    return {"outcome": "both_failed", "error": combined_error, "attempts": attempts}
+
+
 # v0.2.6 -- extracción de pedidos de factura para el bot de facturación ARCA
 # (ver CFO y Decisiones Estrategicas/Proyecto_Facturacion_WhatsApp_ARCA.md).
 # Mismo patrón de resiliencia que extract()/clasificar_y_redactar_mensaje().

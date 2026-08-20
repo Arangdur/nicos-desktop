@@ -39,8 +39,14 @@ DRAPP_ENV = {"DRAPP_RESOURCE_ID": "resources/8c8a2304", "DRAPP_SERVICE_KEY_MEDIC
 
 DISPONIBILIDAD_FAKE = {
     "slots": {
+        # v0.2.6 (21/08) -- ofrecer_horarios ahora toma UN horario por día
+        # distinto (no todos seguidos del mismo día) -- 3 días separados
+        # para que el test siga cubriendo eso. El 10:10 del primer día
+        # queda a propósito para confirmar que NO se ofrece (se prioriza
+        # variedad de días sobre el segundo horario del mismo día).
         "2026-08-20": {"10:00": {"capacity": 1}, "10:10": {"capacity": 1}},
         "2026-08-21": {"09:00": {"capacity": 1}},
+        "2026-08-24": {"11:00": {"capacity": 1}},
     },
 }
 
@@ -104,6 +110,38 @@ class TestOfrecerHorarios(_BaseTemp):
         with patch.dict(os.environ, DRAPP_ENV):
             self.assertIsNone(turnos_conversacion.ofrecer_horarios("+5493584390004"))
 
+    @patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE)
+    @patch("ai_router.interpretar_preferencia_fecha", return_value={"outcome": "success", "data": {"dias_desde_hoy": 7}})
+    def test_preferencia_de_fecha_del_mensaje_corre_la_ventana_de_busqueda(self, mock_pref, mock_disp):
+        # v0.2.6 (21/08) -- pedido real de Nicolás: "para la semana que
+        # viene" tiene que buscarse desde esa fecha, no desde hoy.
+        import datetime
+        with patch.dict(os.environ, DRAPP_ENV):
+            turnos_conversacion.ofrecer_horarios("+5493584390005", "quiero un turno para la semana que viene")
+
+        mock_pref.assert_called_once_with("quiero un turno para la semana que viene")
+        desde_usado = mock_disp.call_args[0][2]  # consultar_disponibilidad(resource, service, desde, hasta)
+        desde_esperado = (datetime.datetime.now().date() + datetime.timedelta(days=7)).isoformat()
+        self.assertEqual(desde_usado, desde_esperado)
+
+    @patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE)
+    def test_sin_preferencia_de_fecha_busca_desde_hoy(self, mock_disp):
+        import datetime
+        with patch.dict(os.environ, DRAPP_ENV):
+            turnos_conversacion.ofrecer_horarios("+5493584390006", "quiero un turno")
+        desde_usado = mock_disp.call_args[0][2]
+        self.assertEqual(desde_usado, datetime.datetime.now().date().isoformat())
+
+    @patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE)
+    def test_ofrece_un_horario_por_dia_distinto_no_todos_seguidos(self, mock_disp):
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.ofrecer_horarios("+5493584390007")
+        conv = turnos_conversacion.hay_conversacion_activa("+5493584390007")
+        opciones = json.loads(conv["opciones_json"])
+        dias = [o["day"] for o in opciones]
+        self.assertEqual(len(dias), len(set(dias)))  # ningún día repetido
+        self.assertNotIn("10:10", resultado["texto"])  # el 2do horario del mismo día no se ofrece
+
 
 class TestProcesarEleccion(_BaseTemp):
     def _ofrecer(self, telefono="+5493584390010"):
@@ -131,7 +169,7 @@ class TestProcesarEleccion(_BaseTemp):
         self.assertEqual(resultado["accion"], "turno_creado")
         mock_crear.assert_called_once_with(
             "resources/8c8a2304", "pms_specialties:medicina-general/pms_practices:consulta",
-            "consumers/xyz789", "2026-08-20", "10:10",  # opción de índice 1
+            "consumers/xyz789", "2026-08-21", "09:00",  # opción de índice 1 -- primer horario del 2do día distinto
         )
         conv = self._conv_de(telefono)
         self.assertEqual(conv["estado"], "confirmado")
@@ -179,6 +217,25 @@ class TestProcesarEleccion(_BaseTemp):
         self.assertIn("no llegué a entender", resultado["texto"].lower())
         self.assertIsNone(resultado["accion"])
         mock_crear.assert_not_called()
+
+    @patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE)
+    @patch("ai_router.interpretar_preferencia_fecha", return_value={"outcome": "success", "data": {"dias_desde_hoy": 7}})
+    @patch("ai_router.interpretar_eleccion_turno", return_value={"outcome": "success", "data": {"eleccion": None}})
+    def test_pedido_de_otra_fecha_reofrece_en_vez_de_decir_no_entendi(self, mock_interp, mock_pref, mock_disp):
+        # v0.2.6 (21/08) -- pedido real de Nicolás: si ninguna opción le
+        # sirve y pide otra fecha, hay que reofrecer con esa fecha, no
+        # solo decir "no entendí cuál elegiste".
+        telefono = self._ofrecer()
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "¿no tenés para la semana que viene?")
+
+        self.assertIsNotNone(resultado)
+        self.assertNotIn("no llegué a entender", resultado["texto"].lower())
+        self.assertIn("horarios", resultado["texto"].lower())
+        # La conversación vieja quedó cerrada y se abrió una nueva con las
+        # opciones reofrecidas.
+        conv = self._conv_de(telefono)
+        self.assertEqual(conv["estado"], "esperando_eleccion")
         conv = self._conv_de(telefono)
         self.assertEqual(conv["estado"], "esperando_eleccion")  # sigue abierta
 
@@ -225,7 +282,7 @@ class TestProcesarEleccion(_BaseTemp):
         self.assertEqual(resultado["accion"], "turno_creado")
         mock_crear.assert_called_once_with(
             "resources/8c8a2304", "pms_specialties:medicina-general/pms_practices:consulta",
-            "consumers/dni12345678", "2026-08-20", "10:10",  # la opción de índice 1, recordada
+            "consumers/dni12345678", "2026-08-21", "09:00",  # la opción de índice 1, recordada
         )
         conv = self._conv_de(telefono)
         self.assertEqual(conv["estado"], "confirmado")

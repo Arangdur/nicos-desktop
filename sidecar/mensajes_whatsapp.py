@@ -125,7 +125,7 @@ def generar_borrador(mensaje_id: str) -> dict:
     accion_drapp = None
 
     if data["clasificacion"] == "turno_nuevo":
-        ofrecido = turnos_conversacion.ofrecer_horarios(row["telefono"])
+        ofrecido = turnos_conversacion.ofrecer_horarios(row["telefono"], row["texto_original"])
         if ofrecido is not None:
             borrador_respuesta = ofrecido["texto"]
             accion_drapp = ofrecido["accion"]

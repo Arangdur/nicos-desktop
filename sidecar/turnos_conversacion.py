@@ -132,18 +132,36 @@ def _pedir_identificacion(conv_id, eleccion_index=None):
     conn.commit()
 
 
-def ofrecer_horarios(telefono: str):
+def ofrecer_horarios(telefono: str, texto_paciente: str = None):
     """Consulta disponibilidad real y arma el texto del borrador con hasta
     `CANTIDAD_OPCIONES_A_OFRECER` opciones reales. `accion` siempre None
     acá -- ofrecer horarios nunca ejecuta nada en DrApp por sí solo. None
-    (no dict) si DrApp no está configurado o la consulta falla."""
+    (no dict) si DrApp no está configurado o la consulta falla.
+
+    v0.2.6 (21/08) -- pedido real de Nicolás: antes siempre ofrecía los 3
+    horarios más próximos, típicamente 3 seguidos del mismo día -- no
+    servía para quien quería un turno para la semana que viene (frecuente
+    en Psiquiatría, según él). Ahora: (1) si `texto_paciente` menciona una
+    preferencia de fecha ("para la semana que viene"), se respeta desde el
+    arranque -- ver ai_router.interpretar_preferencia_fecha, que nunca
+    calcula una fecha ella misma, solo un número de días que se suma acá a
+    datetime.now() real. (2) si no dijo nada, se ofrece UN horario por
+    día distinto (no todos seguidos del mismo día) -- da variedad de
+    fechas sin tener que preguntar."""
     cfg = _config()
     if cfg is None:
         return None
     resource_id, service_key = cfg
+
+    dias_desde_hoy = 0
+    if texto_paciente:
+        resultado_fecha = ai_router.interpretar_preferencia_fecha(texto_paciente)
+        if resultado_fecha["outcome"] == "success" and resultado_fecha["data"]["dias_desde_hoy"] is not None:
+            dias_desde_hoy = resultado_fecha["data"]["dias_desde_hoy"]
+
     hoy = datetime.datetime.now().date()
-    desde = hoy.isoformat()
-    hasta = (hoy + datetime.timedelta(days=DIAS_A_CONSULTAR_DISPONIBILIDAD)).isoformat()
+    desde = (hoy + datetime.timedelta(days=dias_desde_hoy)).isoformat()
+    hasta = (hoy + datetime.timedelta(days=dias_desde_hoy + DIAS_A_CONSULTAR_DISPONIBILIDAD)).isoformat()
     try:
         disponibilidad = drapp_client.consultar_disponibilidad(resource_id, service_key, desde, hasta)
     except (drapp_client.DrAppConfigError, drapp_client.DrAppAPIError):
@@ -155,10 +173,12 @@ def ofrecer_horarios(telefono: str):
     slots_por_dia = (disponibilidad or {}).get("slots", {})
     opciones = []
     for dia in sorted(slots_por_dia.keys()):
-        for hora in sorted(slots_por_dia[dia].keys()):
-            opciones.append({"day": dia, "time": hora, "label": _label_legible(dia, hora)})
-            if len(opciones) >= CANTIDAD_OPCIONES_A_OFRECER:
-                break
+        horas = sorted(slots_por_dia[dia].keys())
+        if not horas:
+            continue
+        # Un solo horario por día -- el primero libre de ese día -- en vez
+        # de agotar las 3 opciones en el mismo día.
+        opciones.append({"day": dia, "time": horas[0], "label": _label_legible(dia, horas[0])})
         if len(opciones) >= CANTIDAD_OPCIONES_A_OFRECER:
             break
 
@@ -174,8 +194,8 @@ def ofrecer_horarios(telefono: str):
     lista = "\n".join(f"{i + 1}) {o['label']}" for i, o in enumerate(opciones))
     return _sin_accion(
         f"¡Hola! 👋 Estos son los horarios que tenemos disponibles para tu consulta de Medicina "
-        f"General:\n{lista}\n\nRespondé con el número del que te quede mejor y te confirmamos el "
-        "turno enseguida. Consultorio Dr. Nicolás Buso."
+        f"General:\n{lista}\n\nRespondé con el número del que te quede mejor, o contame si preferís "
+        "otra fecha y te busco otras opciones. Consultorio Dr. Nicolás Buso."
     )
 
 
@@ -206,6 +226,17 @@ def _procesar_eleccion_horario(conv, telefono, texto):
     opciones = json.loads(conv["opciones_json"])
     resultado = ai_router.interpretar_eleccion_turno(opciones, texto)
     if resultado["outcome"] != "success" or resultado["data"]["eleccion"] is None:
+        # v0.2.6 (21/08) -- antes de rendirse, ver si en realidad está
+        # pidiendo otra fecha ("¿no tenés para la semana que viene?") en
+        # vez de elegir una de las opciones ya ofrecidas -- si es así, se
+        # cierra esta oferta y se vuelve a ofrecer con el rango nuevo, en
+        # vez de simplemente decir "no entendí".
+        resultado_fecha = ai_router.interpretar_preferencia_fecha(texto)
+        if resultado_fecha["outcome"] == "success" and resultado_fecha["data"]["dias_desde_hoy"] is not None:
+            _marcar_conversacion(conv["id"], "expirado")
+            nueva_oferta = ofrecer_horarios(telefono, texto)
+            if nueva_oferta is not None:
+                return nueva_oferta
         return _sin_accion(
             "Uy, no llegué a entender bien cuál elegiste 🤔 ¿me confirmás el número de la opción, "
             "o el horario tal cual te lo mandamos?"
