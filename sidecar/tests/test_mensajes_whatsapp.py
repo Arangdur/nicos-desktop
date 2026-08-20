@@ -337,6 +337,42 @@ class TestGenerarBorrador(unittest.TestCase):
         self.assertTrue(resultado.get("auto_enviado"))
         mock_enviar.assert_called_once_with("+5493584390009", mensajes_whatsapp.ACUSE_RECETA)
 
+    @patch("twilio_client.enviar_whatsapp")
+    @patch("ai_router.clasificar_y_redactar_mensaje")
+    def test_segundo_mensaje_de_receta_no_repite_el_acuse(self, mock_clasificar, mock_enviar):
+        # v0.2.7 (20/08) -- hallazgo real: un paciente preguntó "¿cómo
+        # sabés qué receta necesito?" -- la IA lo volvió a clasificar como
+        # 'receta' (menciona la palabra) y el acuse fijo se mandó de nuevo,
+        # textual, sin contestar nada. Con el acuse ya mandado hace poco,
+        # el segundo mensaje tiene que caer en el camino normal (una
+        # persona lo ve y contesta) en vez de repetir el acuse.
+        telefono = "+5493584390010"
+        mock_clasificar.return_value = {
+            "outcome": "success",
+            "data": {
+                "clasificacion": "receta", "requiere_profesional": True, "urgente": False,
+                "borrador_respuesta": "El Dr. Buso va a revisar tu pedido personalmente.",
+            },
+        }
+        primero_id = mensajes_whatsapp.registrar_mensaje_entrante(telefono, "Hola quiero una receta")["id"]
+        mensajes_whatsapp.generar_borrador(primero_id)
+        mock_enviar.assert_called_once_with(telefono, mensajes_whatsapp.ACUSE_RECETA)
+
+        mock_clasificar.return_value = {
+            "outcome": "success",
+            "data": {
+                "clasificacion": "receta", "requiere_profesional": True, "urgente": False,
+                "borrador_respuesta": "¿Podrías decirme el nombre del medicamento?",
+            },
+        }
+        segundo_id = mensajes_whatsapp.registrar_mensaje_entrante(telefono, "bueno gracias, pero como sabes que receta necesito?")["id"]
+        resultado = mensajes_whatsapp.generar_borrador(segundo_id)
+        self.assertNotIn("auto_enviado", resultado)
+        mock_enviar.assert_called_once()  # sigue en uno solo -- no se repitió
+        segundo = mensajes_whatsapp.list_mensajes("borrador_generado")
+        self.assertEqual(len(segundo), 1)
+        self.assertEqual(segundo[0]["borrador_respuesta"], "¿Podrías decirme el nombre del medicamento?")
+
 
 class TestAprobarYRechazar(unittest.TestCase):
     def setUp(self):

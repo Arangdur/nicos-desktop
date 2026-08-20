@@ -37,10 +37,32 @@ ACUSE_RECETA = (
     "que lo gestionen. En cuanto esté lista te avisamos por acá. ¡Gracias por tu paciencia! "
     "Consultorio Dr. Nicolás Buso."
 )
+# v0.2.7 (20/08) -- hallazgo real: un paciente hizo una pregunta de
+# seguimiento ("¿cómo sabés qué receta necesito?") que la IA volvió a
+# clasificar como 'receta' (tiene sentido, menciona la palabra) -- y el
+# acuse fijo se mandó de nuevo, textual, sin contestar nada. Si ya se
+# mandó el acuse a este teléfono hace poco, la siguiente vez que
+# clasifique 'receta' NO se repite -- se trata como cualquier otro
+# mensaje (una persona lo ve y contesta de verdad).
+ACUSE_RECETA_VIGENCIA_HORAS = 4
 
 
 def _now_iso():
     return datetime.datetime.utcnow().isoformat()
+
+
+def _acuse_receta_reciente(telefono: str) -> bool:
+    """True si ya se mandó el acuse automático de receta a este teléfono
+    hace poco (ver ACUSE_RECETA_VIGENCIA_HORAS) -- evita repetir el mismo
+    texto fijo palabra por palabra ante un mensaje de seguimiento."""
+    conn = db.get_connection()
+    limite = (datetime.datetime.utcnow() - datetime.timedelta(hours=ACUSE_RECETA_VIGENCIA_HORAS)).isoformat()
+    row = conn.execute(
+        "SELECT 1 FROM mensajes_whatsapp_entrantes WHERE telefono = ? AND clasificacion = 'receta' "
+        "AND resuelto_by = 'sistema' AND resuelto_at >= ? LIMIT 1",
+        (telefono, limite),
+    ).fetchone()
+    return row is not None
 
 
 class MensajeWhatsappError(Exception):
@@ -144,7 +166,7 @@ def generar_borrador(mensaje_id: str) -> dict:
         if cancelado is not None:
             borrador_respuesta = cancelado["texto"]
             accion_drapp = cancelado["accion"]
-    elif data["clasificacion"] == "receta":
+    elif data["clasificacion"] == "receta" and not _acuse_receta_reciente(row["telefono"]):
         # v0.2.7 (20/08) -- pedido real de Nicolás: el acuse de "recibimos
         # tu pedido" no necesita esperar aprobación -- texto fijo (no el
         # que redacta la IA, para que sea siempre igual de consistente),
@@ -152,6 +174,12 @@ def generar_borrador(mensaje_id: str) -> dict:
         # como hasta ahora, fuera de este sistema -- esto no emite ni
         # aprueba nada clínico, solo avisa que el pedido llegó. Marianela
         # sigue viendo el pedido en la Bandeja igual que siempre.
+        #
+        # hallazgo real: si ya se mandó este acuse hace poco (ver
+        # _acuse_receta_reciente), NO se repite -- un mensaje de
+        # seguimiento ("¿cómo sabés cuál necesito?") también clasifica
+        # 'receta' pero merece que una persona lo vea y conteste de
+        # verdad, no el mismo acuse de nuevo.
         borrador_respuesta = ACUSE_RECETA
 
     # v0.2.6 (20/08) -- pedido real de Nicolás: un saludo puro ("hola",
@@ -165,7 +193,7 @@ def generar_borrador(mensaje_id: str) -> dict:
     # a mano).
     auto_enviable = accion_drapp is None and (
         (data["clasificacion"] == "ambiguo" and not data["requiere_profesional"] and not data["urgente"])
-        or data["clasificacion"] == "receta"
+        or (data["clasificacion"] == "receta" and borrador_respuesta == ACUSE_RECETA)
     )
     if auto_enviable:
         try:
