@@ -61,6 +61,13 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
       </p>
       <label>URL pública del Funnel (ej. https://tu-mac.tailXXXX.ts.net)</label>
       <input type="text" id="twilio-webhook-base" value="${current.TWILIO_WEBHOOK_BASE_URL || ''}" placeholder="https://macbook-de-nicolas.tailXXXX.ts.net">
+      <label>WhatsApp del consultorio (Marianela) -- para reenviarle pedidos de receta</label>
+      <input type="text" id="consultorio-whatsapp" value="${current.CONSULTORIO_WHATSAPP_NUMERO || ''}" placeholder="+5493537599192">
+      <p class="help-text">
+        Cuando llega un pedido de receta, además de contestarle al paciente se le reenvía
+        el pedido a este número para que Marianela se contacte y siga el trámite. Vacío = no
+        se reenvía nada (la receta sigue viéndose en la Bandeja igual).
+      </p>
     </div>
 
     <div class="card">
@@ -183,6 +190,7 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
       DRAPP_RESOURCE_ID: containerEl.querySelector('#drapp-resource-id').value.trim(),
       DRAPP_SERVICE_KEY_MEDICINA_GENERAL: containerEl.querySelector('#drapp-service-key').value.trim(),
       TWILIO_WEBHOOK_BASE_URL: containerEl.querySelector('#twilio-webhook-base').value.trim().replace(/\/$/, ''),
+      CONSULTORIO_WHATSAPP_NUMERO: containerEl.querySelector('#consultorio-whatsapp').value.trim(),
       FACTURACION_TELEFONOS_AUTORIZADOS: containerEl.querySelector('#facturacion-telefonos').value.trim(),
       GMAIL_CLIENT_ID: containerEl.querySelector('#gmail-client-id').value.trim(),
     };

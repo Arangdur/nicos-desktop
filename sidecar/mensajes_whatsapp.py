@@ -26,7 +26,9 @@ patrón que recordatorios.py y abate_enfermeria.py):
   prescriptions de DrApp (esos actos exigen la identidad del profesional).
 """
 import datetime
+import os
 import secrets
+import sys
 
 import ai_router
 import db
@@ -70,6 +72,28 @@ def _acuse_receta_reciente(telefono: str) -> bool:
         (telefono, limite),
     ).fetchone()
     return row is not None
+
+
+def _reenviar_pedido_receta_a_consultorio(telefono_paciente: str, texto_original: str):
+    """v0.2.7 (20/08) -- pedido real de Nicolás: además de contestarle al
+    paciente, reenviar el pedido al WhatsApp que Marianela ya atiende
+    (Ajustes -> CONSULTORIO_WHATSAPP_NUMERO) para que se contacte y siga
+    el trámite -- la receta en sí se sigue gestionando exactamente igual
+    que hasta ahora, esto solo la avisa. Sin ese número configurado, no
+    hace nada (la receta se sigue viendo en la Bandeja igual). Si el
+    envío falla, no rompe el flujo principal -- el paciente ya recibió su
+    acuse de todas formas, solo se pierde el aviso a Marianela."""
+    numero = os.getenv("CONSULTORIO_WHATSAPP_NUMERO")
+    if not numero:
+        return
+    texto = (
+        f"📋 Pedido de receta de {telefono_paciente}:\n\"{texto_original}\"\n\n"
+        "Ya se le mandó el acuse automático -- coordiná con el paciente para seguir el trámite."
+    )
+    try:
+        twilio_client.enviar_whatsapp(numero, texto)
+    except (twilio_client.TwilioConfigError, twilio_client.TwilioSendError) as e:
+        sys.stderr.write(f"[mensajes_whatsapp] no se pudo reenviar pedido de receta a Marianela: {e}\n")
 
 
 class MensajeWhatsappError(Exception):
@@ -212,6 +236,9 @@ def generar_borrador(mensaje_id: str) -> dict:
             twilio_client.enviar_whatsapp(row["telefono"], borrador_respuesta)
         except (twilio_client.TwilioConfigError, twilio_client.TwilioSendError):
             auto_enviable = False
+        else:
+            if data["clasificacion"] == "receta":
+                _reenviar_pedido_receta_a_consultorio(row["telefono"], row["texto_original"])
 
     if auto_enviable:
         conn.execute(

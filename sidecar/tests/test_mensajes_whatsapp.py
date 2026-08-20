@@ -321,6 +321,47 @@ class TestGenerarBorrador(unittest.TestCase):
 
     @patch("twilio_client.enviar_whatsapp")
     @patch("ai_router.clasificar_y_redactar_mensaje")
+    def test_receta_reenvia_el_pedido_al_consultorio(self, mock_clasificar, mock_enviar):
+        # v0.2.7 (20/08) -- pedido real de Nicolás: además de contestarle
+        # al paciente, reenviar el pedido al WhatsApp que Marianela atiende
+        # para que se contacte y siga el trámite -- la receta en sí sigue
+        # gestionándose exactamente igual que hasta ahora, esto solo la avisa.
+        mock_clasificar.return_value = {
+            "outcome": "success",
+            "data": {
+                "clasificacion": "receta", "requiere_profesional": True, "urgente": False,
+                "borrador_respuesta": "irrelevante -- se pisa con el acuse fijo",
+            },
+        }
+        with patch.dict(os.environ, {"CONSULTORIO_WHATSAPP_NUMERO": "+5493537599192"}):
+            mensaje_id = mensajes_whatsapp.registrar_mensaje_entrante("+5493584390004", "Necesito la receta de sertralina")["id"]
+            mensajes_whatsapp.generar_borrador(mensaje_id)
+
+        self.assertEqual(mock_enviar.call_count, 2)
+        mock_enviar.assert_any_call("+5493584390004", mensajes_whatsapp.ACUSE_RECETA)
+        segunda_llamada = mock_enviar.call_args_list[1]
+        self.assertEqual(segunda_llamada[0][0], "+5493537599192")
+        self.assertIn("+5493584390004", segunda_llamada[0][1])
+        self.assertIn("Necesito la receta de sertralina", segunda_llamada[0][1])
+
+    @patch("twilio_client.enviar_whatsapp")
+    @patch("ai_router.clasificar_y_redactar_mensaje")
+    def test_receta_sin_numero_de_consultorio_configurado_no_reenvia(self, mock_clasificar, mock_enviar):
+        mock_clasificar.return_value = {
+            "outcome": "success",
+            "data": {
+                "clasificacion": "receta", "requiere_profesional": True, "urgente": False,
+                "borrador_respuesta": "irrelevante -- se pisa con el acuse fijo",
+            },
+        }
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CONSULTORIO_WHATSAPP_NUMERO", None)
+            mensaje_id = mensajes_whatsapp.registrar_mensaje_entrante("+5493584390004", "Necesito una receta")["id"]
+            mensajes_whatsapp.generar_borrador(mensaje_id)
+        mock_enviar.assert_called_once_with("+5493584390004", mensajes_whatsapp.ACUSE_RECETA)
+
+    @patch("twilio_client.enviar_whatsapp")
+    @patch("ai_router.clasificar_y_redactar_mensaje")
     def test_receta_urgente_tambien_manda_el_acuse_solo(self, mock_clasificar, mock_enviar):
         # A diferencia del saludo puro, el acuse de receta se manda igual
         # aunque venga marcado urgente -- no compromete nada clínico, y un
