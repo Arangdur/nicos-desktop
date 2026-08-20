@@ -137,6 +137,19 @@ class TestProcesarEleccion(_BaseTemp):
         self.assertEqual(conv["estado"], "confirmado")
         self.assertEqual(conv["drapp_event_id"], "events/nuevo123")
 
+    @patch("drapp_client.crear_turno")
+    @patch("drapp_client.buscar_paciente_por_telefono", return_value={"id": "consumers/xyz789"})
+    @patch("ai_router.interpretar_eleccion_turno", return_value={"outcome": "success", "data": {"eleccion": 0}})
+    def test_confirmacion_incluye_la_ubicacion_real_que_asigno_drapp(self, mock_interp, mock_buscar, mock_crear):
+        # v0.2.6 -- hallazgo real (21/08): la disponibilidad mezcla varios
+        # consultorios sin indicar cuál es cuál -- el paciente tiene que
+        # enterarse de dónde quedó el turno, no solo la hora.
+        telefono = self._ofrecer()
+        mock_crear.return_value = {"id": "events/x", "location": {"label": "EL PUENTE", "address": "Calle 1 746, Ordoñez"}}
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "el primero")
+        self.assertIn("el puente", resultado["texto"].lower())
+
     def _conv_de(self, telefono):
         conn = db.get_connection()
         return dict(conn.execute(

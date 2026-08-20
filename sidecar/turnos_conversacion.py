@@ -233,8 +233,17 @@ def _reservar_turno(conv_id, resource_id, service_key, paciente, elegido):
         return _sin_accion("Tuvimos un problema para confirmar tu turno en el sistema -- alguien del consultorio te va a contactar.")
 
     _marcar_conversacion(conv_id, "confirmado", drapp_event_id=(turno or {}).get("id"))
+    # v0.2.6 -- hallazgo real (21/08): la disponibilidad mezcla varios
+    # consultorios físicos sin indicar cuál es cuál (ver ai_router/nota en
+    # el docstring del módulo) -- DrApp elige el lugar en silencio al crear
+    # el turno. Antes no se lo comunicaba a nadie; el evento creado SÍ trae
+    # la ubicación real, así que se la agregamos a la confirmación -- si es
+    # la que no le sirve al paciente, puede reaccionar de inmediato.
+    ubicacion = (turno or {}).get("location") or {}
+    lugar = ubicacion.get("label") or ubicacion.get("address")
+    lugar_texto = f", en {lugar}" if lugar else ""
     return {
-        "texto": f"Listo! Tu turno quedó confirmado para el {elegido['label']}. Te esperamos. Consultorio Dr. Nicolás Buso.",
+        "texto": f"Listo! Tu turno quedó confirmado para el {elegido['label']}{lugar_texto}. Te esperamos. Consultorio Dr. Nicolás Buso.",
         "accion": "turno_creado",
     }
 
