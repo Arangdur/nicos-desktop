@@ -1,6 +1,6 @@
 """
-Fase C -- motor de reserva y cancelación de turnos de Medicina General por
-WhatsApp. Conversación de varios mensajes con estado guardado en
+Fase C -- motor de reserva y cancelación de turnos por WhatsApp (Medicina
+General y, desde v0.2.7, Psiquiatría). Conversación de varios mensajes con estado guardado en
 turnos_conversacion (ver migraciones 013/015). Nunca inventa un horario ni
 reserva/cancela nada sin que el paciente lo haya confirmado por escrito,
 contra datos REALES consultados en vivo a DrApp -- ver ai_router.
@@ -41,13 +41,25 @@ resuelve el lugar solo al crear el turno, no es un parámetro que
 `POST /events` acepte).
 
 v0.2.7 (20/08) -- Nicolás hace Medicina General SOLO en el consultorio de
-Ordoñez (Psiquiatría es aparte, en Posse -- pero Psiquiatría todavía no
-se agenda por WhatsApp, ver decisión de alcance). Como no se le puede
-pedir la ubicación a DrApp al crear el turno, `_reservar_turno` valida la
-ubicación que DEVUELVE después de crearlo -- si no es Ordoñez, cancela
-el turno solo y deriva, en vez de confirmarle al paciente un turno en el
+Ordoñez y Psiquiatría SOLO en Posse (excepto una vez al mes en Ordoñez --
+esa excepción queda AFUERA de este bot a propósito, se sigue coordinando
+a mano). Como no se le puede pedir la ubicación a DrApp al crear el
+turno, `_reservar_turno` valida la ubicación que DEVUELVE después de
+crearlo -- si no es la que corresponde a la especialidad, cancela el
+turno solo y deriva, en vez de confirmarle al paciente un turno en el
 consultorio equivocado (se encontró un caso real así, cargado a mano
 fuera de este bot).
+
+v0.2.7 (20/08) -- Fase de Psiquiatría, decisión de diseño confirmada con
+Nicolás: un "quiero un turno" que no diga cuál especialidad dispara un
+menú explícito (1=Medicina General, 2=Psiquiatría, 3=otras especialidades
+-- estas últimas se derivan al contacto de Stefania Rufinetto, ver
+CONTACTO_OTRAS_ESPECIALIDADES, nunca se agendan acá). Si el mensaje YA
+deja clara la especialidad ("turno con el psiquiatra"), se salta el menú
+y va directo a ofrecer horarios de esa especialidad. Los mensajes de
+Psiquiatría llevan un tono más cálido que los de rutina, y -- como
+siempre en este módulo -- nunca mencionan motivo de consulta ni
+diagnóstico, solo día/hora/consultorio.
 """
 import datetime
 import json
@@ -96,6 +108,49 @@ FRANJA_ORDONEZ_MEDICINA_GENERAL = {
     3: ("11:00", "13:00"),  # jueves
     4: ("10:00", "13:00"),  # viernes
 }
+# v0.2.7 (20/08) -- confirmado con Nicolás: P-SIA es 100% Psiquiatría, en
+# Justiniano Posse -- sin trampa como "EL PUENTE". Franjas cruzadas contra
+# turnos reales ya reservados (futuros, no los viejos de antes del cambio
+# de plantilla). Nunca miércoles/sábado/domingo, y ningún día se pisa con
+# las franjas de Ordoñez de arriba.
+UBICACION_POSSE_ID = "place-7mtlojwwiev0sezrafw9oe"
+FRANJA_POSSE_PSIQUIATRIA = {
+    0: ("15:00", "18:30"),  # lunes
+    1: ("08:00", "09:00"),  # martes
+    3: ("15:30", "17:30"),  # jueves
+    4: ("08:30", "09:30"),  # viernes
+}
+# v0.2.7 (20/08) -- "otras especialidades" (oftalmología, cardiología,
+# ginecología, neurología, endocrinología) no se agendan acá -- se derivan
+# a quien las coordina, pedido explícito de Nicolás.
+CONTACTO_OTRAS_ESPECIALIDADES = "Stefania Rufinetto, +54 9 3537 60-6792"
+
+# Config por especialidad -- qué variable de entorno trae el service key de
+# DrApp, a qué consultorio corresponde, y en qué franja real. Agregar una
+# especialidad nueva el día de mañana es sumar una entrada acá, no reescribir
+# el resto del módulo.
+ESPECIALIDADES = {
+    "medicina_general": {
+        "nombre": "Medicina General",
+        "service_key_env": "DRAPP_SERVICE_KEY_MEDICINA_GENERAL",
+        "ubicacion_id": UBICACION_ORDONEZ_ID,
+        "franja": FRANJA_ORDONEZ_MEDICINA_GENERAL,
+    },
+    "psiquiatria": {
+        "nombre": "Psiquiatría",
+        "service_key_env": "DRAPP_SERVICE_KEY_PSIQUIATRIA",
+        "ubicacion_id": UBICACION_POSSE_ID,
+        "franja": FRANJA_POSSE_PSIQUIATRIA,
+    },
+}
+
+MENU_ESPECIALIDAD = (
+    "¡Hola! 👋 ¿Para qué especialidad necesitás el turno?\n"
+    "1) Medicina General\n"
+    "2) Psiquiatría\n"
+    "3) Otros turnos (otras especialidades)\n\n"
+    "Respondé con el número que corresponda."
+)
 
 DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 MESES = [
@@ -108,12 +163,19 @@ def _now_iso():
     return datetime.datetime.utcnow().isoformat()
 
 
-def _config():
+def _config(especialidad: str = "medicina_general"):
     resource_id = os.getenv("DRAPP_RESOURCE_ID")
-    service_key = os.getenv("DRAPP_SERVICE_KEY_MEDICINA_GENERAL")
+    service_key = os.getenv(ESPECIALIDADES[especialidad]["service_key_env"])
     if not resource_id or not service_key:
         return None
     return resource_id, service_key
+
+
+def _drapp_activo() -> bool:
+    """Chequeo mínimo para lo que no depende de una especialidad puntual
+    (ej. cancelación, que busca contra TODOS los turnos del paciente sin
+    necesitar ningún service key en particular)."""
+    return bool(os.getenv("DRAPP_RESOURCE_ID"))
 
 
 def _label_legible(day: str, time: str) -> str:
@@ -125,11 +187,11 @@ def _sin_accion(texto: str) -> dict:
     return {"texto": texto, "accion": None}
 
 
-def _en_franja_ordonez(day: str, time: str) -> bool:
-    """True si ese día/horario cae dentro de la franja real de Medicina
-    General en Ordoñez (ver FRANJA_ORDONEZ_MEDICINA_GENERAL) -- comparación
-    de strings alcanza porque HH:MM siempre viene con cero a la izquierda."""
-    franja = FRANJA_ORDONEZ_MEDICINA_GENERAL.get(datetime.date.fromisoformat(day).weekday())
+def _en_franja(especialidad: str, day: str, time: str) -> bool:
+    """True si ese día/horario cae dentro de la franja real de esa
+    especialidad (ver ESPECIALIDADES) -- comparación de strings alcanza
+    porque HH:MM siempre viene con cero a la izquierda."""
+    franja = ESPECIALIDADES[especialidad]["franja"].get(datetime.date.fromisoformat(day).weekday())
     if franja is None:
         return False
     desde, hasta = franja
@@ -148,7 +210,7 @@ def hay_conversacion_activa(telefono: str):
     conn = db.get_connection()
     row = conn.execute(
         "SELECT * FROM turnos_conversacion WHERE telefono = ? "
-        "AND estado IN ('esperando_eleccion', 'esperando_identificacion') "
+        "AND estado IN ('esperando_especialidad', 'esperando_eleccion', 'esperando_identificacion') "
         "ORDER BY creado_at DESC LIMIT 1",
         (telefono,),
     ).fetchone()
@@ -187,15 +249,15 @@ def cerrar_conversacion_activa(telefono: str, mensaje_id: str = None):
     _marcar_conversacion(conv["id"], "cancelado")
 
 
-def _crear_conversacion(telefono, tipo, estado, opciones=None, eleccion_index=None, mensaje_id=None):
+def _crear_conversacion(telefono, tipo, estado, opciones=None, eleccion_index=None, mensaje_id=None, especialidad=None):
     conn = db.get_connection()
     now = _now_iso()
     conv_id = secrets.token_hex(8)
     conn.execute(
         "INSERT INTO turnos_conversacion "
-        "(id, telefono, tipo, estado, opciones_json, eleccion_index, mensaje_origen_id, creado_at, actualizado_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (conv_id, telefono, tipo, estado, json.dumps(opciones) if opciones is not None else None, eleccion_index, mensaje_id, now, now),
+        "(id, telefono, tipo, estado, especialidad, opciones_json, eleccion_index, mensaje_origen_id, creado_at, actualizado_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (conv_id, telefono, tipo, estado, especialidad, json.dumps(opciones) if opciones is not None else None, eleccion_index, mensaje_id, now, now),
     )
     conn.commit()
     return conv_id
@@ -220,10 +282,47 @@ def _pedir_identificacion(conv_id, eleccion_index=None):
 
 
 def ofrecer_horarios(telefono: str, texto_paciente: str = None, mensaje_id: str = None):
+    """Punto de entrada público para "quiero un turno". v0.2.7 (20/08),
+    Fase de Psiquiatría: primero hay que saber la especialidad -- si
+    `texto_paciente` ya la deja clara ("turno con el psiquiatra"), se salta
+    directo a ofrecer esa especialidad (`_ofrecer_horarios_especialidad`);
+    si menciona otra especialidad que el consultorio deriva (oftalmología,
+    cardiología, etc.), responde con el contacto correspondiente; si no
+    queda claro, pregunta con el menú explícito (`MENU_ESPECIALIDAD`) antes
+    de mostrar cualquier horario -- decisión de diseño confirmada con
+    Nicolás, no asumir Medicina General por default. None (no dict) si
+    DrApp no está configurado en absoluto."""
+    if not _drapp_activo():
+        return None
+
+    especialidad = None
+    if texto_paciente:
+        resultado_esp = ai_router.interpretar_especialidad(texto_paciente)
+        if resultado_esp["outcome"] == "success":
+            especialidad = resultado_esp["data"]["especialidad"]
+
+    if especialidad == "otras_especialidades":
+        return _sin_accion(_texto_derivar_otras_especialidades())
+    if especialidad in ESPECIALIDADES:
+        return _ofrecer_horarios_especialidad(especialidad, telefono, texto_paciente, mensaje_id)
+
+    _crear_conversacion(telefono, tipo="turno_nuevo", estado="esperando_especialidad", mensaje_id=mensaje_id)
+    return _sin_accion(MENU_ESPECIALIDAD)
+
+
+def _texto_derivar_otras_especialidades() -> str:
+    return (
+        f"¡Hola! 👋 Para esa especialidad coordina turnos {CONTACTO_OTRAS_ESPECIALIDADES} -- "
+        "escribile directo y te va a ayudar. ¡Gracias por escribirnos!"
+    )
+
+
+def _ofrecer_horarios_especialidad(especialidad: str, telefono: str, texto_paciente: str = None, mensaje_id: str = None):
     """Consulta disponibilidad real y arma el texto del borrador con hasta
-    `CANTIDAD_OPCIONES_A_OFRECER` opciones reales. `accion` siempre None
-    acá -- ofrecer horarios nunca ejecuta nada en DrApp por sí solo. None
-    (no dict) si DrApp no está configurado o la consulta falla.
+    `CANTIDAD_OPCIONES_A_OFRECER` opciones reales, ya para una especialidad
+    concreta (`ESPECIALIDADES`). `accion` siempre None acá -- ofrecer
+    horarios nunca ejecuta nada en DrApp por sí solo. None (no dict) si
+    esa especialidad no está configurada o la consulta falla.
 
     v0.2.6 (21/08) -- pedido real de Nicolás: antes siempre ofrecía los 3
     horarios más próximos, típicamente 3 seguidos del mismo día -- no
@@ -235,7 +334,7 @@ def ofrecer_horarios(telefono: str, texto_paciente: str = None, mensaje_id: str 
     datetime.now() real. (2) si no dijo nada, se ofrece UN horario por
     día distinto (no todos seguidos del mismo día) -- da variedad de
     fechas sin tener que preguntar."""
-    cfg = _config()
+    cfg = _config(especialidad)
     if cfg is None:
         return None
     resource_id, service_key = cfg
@@ -266,13 +365,13 @@ def ofrecer_horarios(telefono: str, texto_paciente: str = None, mensaje_id: str 
         # bloqueado, >=1 = libre). Antes se tomaba el primer horario de la
         # lista sin mirar esto, y se llegó a ofrecer -- y crear -- un turno
         # que ya estaba reservado por otro paciente en otro consultorio.
-        # v0.2.7 (20/08) -- además, la grilla mezcla Ordoñez y Posse sin
+        # v0.2.7 (20/08) -- además, la grilla mezcla los consultorios sin
         # indicar cuál es cuál -- se filtra también por la franja horaria
-        # real de Ordoñez (ver FRANJA_ORDONEZ_MEDICINA_GENERAL) para no
-        # ofrecer nunca un horario que en realidad es de Posse.
+        # real de esta especialidad (ver ESPECIALIDADES) para no ofrecer
+        # nunca un horario que en realidad es de otro consultorio.
         horas_libres = sorted(
             h for h, s in slots_por_dia[dia].items()
-            if (s or {}).get("capacity", 0) > 0 and _en_franja_ordonez(dia, h)
+            if (s or {}).get("capacity", 0) > 0 and _en_franja(especialidad, dia, h)
         )
         if not horas_libres:
             continue
@@ -282,20 +381,27 @@ def ofrecer_horarios(telefono: str, texto_paciente: str = None, mensaje_id: str 
         if len(opciones) >= CANTIDAD_OPCIONES_A_OFRECER:
             break
 
+    nombre_especialidad = ESPECIALIDADES[especialidad]["nombre"]
     if not opciones:
         return _sin_accion(
-            "¡Hola! 👋 Por ahora no tenemos horarios disponibles para Medicina General en los "
+            f"¡Hola! 👋 Por ahora no tenemos horarios disponibles para {nombre_especialidad} en los "
             "próximos días, pero ya avisamos al consultorio para que se comunique con vos y "
             "coordinemos. ¡Gracias por tu paciencia! Consultorio Dr. Nicolás Buso."
         )
 
-    _crear_conversacion(telefono, tipo="turno_nuevo", estado="esperando_eleccion", opciones=opciones, mensaje_id=mensaje_id)
+    _crear_conversacion(
+        telefono, tipo="turno_nuevo", estado="esperando_eleccion", opciones=opciones,
+        mensaje_id=mensaje_id, especialidad=especialidad,
+    )
 
+    # v0.2.7 (20/08) -- pedido real de Nicolás: los mensajes de Psiquiatría
+    # llevan un tono más cálido que un turno de rutina.
+    saludo = "¡Hola! 🤍 Quiero ayudarte a encontrar un buen horario." if especialidad == "psiquiatria" else "¡Hola! 👋"
     lista = "\n".join(f"{i + 1}) {o['label']}" for i, o in enumerate(opciones))
     return _sin_accion(
-        f"¡Hola! 👋 Estos son los horarios que tenemos disponibles para tu consulta de Medicina "
-        f"General:\n{lista}\n\nRespondé con el número del que te quede mejor, o contame si preferís "
-        "otra fecha y te busco otras opciones. Consultorio Dr. Nicolás Buso."
+        f"{saludo} Estos son los horarios que tenemos disponibles para tu consulta de "
+        f"{nombre_especialidad}:\n{lista}\n\nRespondé con el número del que te quede mejor, o "
+        "contame si preferís otra fecha y te busco otras opciones. Consultorio Dr. Nicolás Buso."
     )
 
 
@@ -311,12 +417,42 @@ def procesar_eleccion(telefono: str, texto: str, mensaje_id: str = None):
 
     if conv["estado"] == "esperando_identificacion":
         return _procesar_identificacion(conv, texto)
+    if conv["estado"] == "esperando_especialidad":
+        return _procesar_especialidad(conv, telefono, texto, mensaje_id=mensaje_id)
 
     return _procesar_eleccion_horario(conv, telefono, texto, mensaje_id=mensaje_id)
 
 
+def _procesar_especialidad(conv, telefono, texto, mensaje_id=None):
+    """El paciente ya recibió el menú (MENU_ESPECIALIDAD) -- interpreta la
+    respuesta (número o texto libre, mismo clasificador que detecta la
+    especialidad en un mensaje inicial) y despacha a la oferta real, o
+    deriva si pidió otra especialidad."""
+    resultado = ai_router.interpretar_especialidad(texto)
+    especialidad = resultado["data"]["especialidad"] if resultado["outcome"] == "success" else None
+
+    if especialidad == "otras_especialidades":
+        _marcar_conversacion(conv["id"], "derivado")
+        return _sin_accion(_texto_derivar_otras_especialidades())
+    if especialidad in ESPECIALIDADES:
+        # Esta conversación (esperando_especialidad) ya cumplió su función
+        # -- la oferta real abre una conversación nueva, propia de esa
+        # especialidad (ver _ofrecer_horarios_especialidad).
+        _marcar_conversacion(conv["id"], "expirado")
+        nueva_oferta = _ofrecer_horarios_especialidad(especialidad, telefono, texto, mensaje_id)
+        if nueva_oferta is not None:
+            return nueva_oferta
+        return _sin_accion("Tuvimos un problema técnico para mostrarte los horarios -- alguien del consultorio te va a contactar.")
+
+    return _sin_accion(
+        "Uy, no entendí bien cuál opción elegiste 🤔 respondé con 1 (Medicina General), "
+        "2 (Psiquiatría) o 3 (otros turnos)."
+    )
+
+
 def _procesar_eleccion_horario(conv, telefono, texto, mensaje_id=None):
-    cfg = _config()
+    especialidad = conv["especialidad"] or "medicina_general"
+    cfg = _config(especialidad)
     if cfg is None:
         # No debería pasar (si se pudo ofrecer, DrApp estaba configurado),
         # pero por las dudas nunca se cuelga sin respuesta.
@@ -334,7 +470,14 @@ def _procesar_eleccion_horario(conv, telefono, texto, mensaje_id=None):
         resultado_fecha = ai_router.interpretar_preferencia_fecha(texto)
         if resultado_fecha["outcome"] == "success" and resultado_fecha["data"]["dias_desde_hoy"] is not None:
             _marcar_conversacion(conv["id"], "expirado")
-            nueva_oferta = ofrecer_horarios(telefono, texto, mensaje_id=mensaje_id)
+            # v0.2.7 (20/08) -- llama a la versión YA acotada a esta
+            # especialidad, no al punto de entrada público -- si llamara a
+            # ofrecer_horarios() de nuevo, volvería a detectar la
+            # especialidad desde este mensaje puntual (que puede no
+            # mencionarla, ej. "¿no tenés para la semana que viene?") y
+            # perdería la especialidad ya sabida, cayendo otra vez en el
+            # menú 1/2/3.
+            nueva_oferta = _ofrecer_horarios_especialidad(especialidad, telefono, texto, mensaje_id)
             if nueva_oferta is not None:
                 return nueva_oferta
         # v0.2.6 (20/08) -- pedido real de Nicolás: si ni es una elección ni
@@ -367,10 +510,10 @@ def _procesar_eleccion_horario(conv, telefono, texto, mensaje_id=None):
             "tu nombre y apellido completo y confirmamos el turno enseguida."
         )
 
-    return _reservar_turno(conv["id"], resource_id, service_key, paciente, elegido)
+    return _reservar_turno(conv["id"], especialidad, resource_id, service_key, paciente, elegido)
 
 
-def _reservar_turno(conv_id, resource_id, service_key, paciente, elegido):
+def _reservar_turno(conv_id, especialidad, resource_id, service_key, paciente, elegido):
     try:
         turno = drapp_client.crear_turno(resource_id, service_key, paciente["id"], elegido["day"], elegido["time"])
     except drapp_client.DrAppConflictError:
@@ -384,13 +527,15 @@ def _reservar_turno(conv_id, resource_id, service_key, paciente, elegido):
 
     ubicacion = (turno or {}).get("location") or {}
 
-    # v0.2.7 (20/08) -- red de seguridad, hallazgo real: Medicina General es
-    # SOLO en Ordoñez, pero DrApp elige el consultorio en silencio al crear
-    # el turno (no es un parámetro que se le pueda pedir) -- ya se encontró
-    # un turno real cargado a mano en el consultorio equivocado. Si el que
-    # asignó no es Ordoñez, se cancela solo y se deriva -- nunca se le
+    # v0.2.7 (20/08) -- red de seguridad, hallazgo real: cada especialidad
+    # es SOLO en su consultorio (ver ESPECIALIDADES), pero DrApp elige el
+    # consultorio en silencio al crear el turno (no es un parámetro que se
+    # le pueda pedir) -- ya se encontró un turno real cargado a mano en el
+    # consultorio equivocado. Si el que asignó no es el que corresponde a
+    # esta especialidad, se cancela solo y se deriva -- nunca se le
     # confirma al paciente un turno en el lugar que no le corresponde.
-    if ubicacion.get("id") and ubicacion["id"] != UBICACION_ORDONEZ_ID:
+    ubicacion_esperada = ESPECIALIDADES[especialidad]["ubicacion_id"]
+    if ubicacion.get("id") and ubicacion["id"] != ubicacion_esperada:
         try:
             drapp_client.cancelar_turno(turno["id"])
         except drapp_client.DrAppAPIError:
@@ -411,7 +556,9 @@ def _reservar_turno(conv_id, resource_id, service_key, paciente, elegido):
     lugar = ubicacion.get("label") or ubicacion.get("address")
     lugar_texto = f", en {lugar}" if lugar else ""
     nombre = _primer_nombre(paciente)
-    saludo = f"¡Listo, {nombre}! ✅" if nombre else "¡Listo! ✅"
+    # v0.2.7 (20/08) -- pedido real de Nicolás: tono más cálido en Psiquiatría.
+    emoji = "🤍" if especialidad == "psiquiatria" else "✅"
+    saludo = f"¡Listo, {nombre}! {emoji}" if nombre else f"¡Listo! {emoji}"
     return {
         "texto": f"{saludo} Tu turno quedó confirmado para el {elegido['label']}{lugar_texto}. Te esperamos con gusto. Consultorio Dr. Nicolás Buso.",
         "accion": "turno_creado",
@@ -439,25 +586,38 @@ def _procesar_identificacion(conv, texto):
         return _cancelar_para_paciente(conv["id"], paciente)
 
     # tipo == "turno_nuevo"
-    cfg = _config()
+    especialidad = conv["especialidad"] or "medicina_general"
+    cfg = _config(especialidad)
     if cfg is None:
         return _sin_accion("Tuvimos un problema técnico para confirmar tu turno -- ya avisamos al consultorio para que se comunique con vos.")
     resource_id, service_key = cfg
     opciones = json.loads(conv["opciones_json"])
     elegido = opciones[conv["eleccion_index"]]
-    return _reservar_turno(conv["id"], resource_id, service_key, paciente, elegido)
+    return _reservar_turno(conv["id"], especialidad, resource_id, service_key, paciente, elegido)
+
+
+def _especialidad_de_label(service_label: str):
+    """Mapea el service.label real de DrApp a nuestra clave interna de
+    especialidad -- None si es algo que este bot no maneja (ej. una de las
+    'otras especialidades' que coordina Stefania, si comparten cuenta de
+    DrApp). Se usa para no cancelar por error un turno que no es de
+    Medicina General ni de Psiquiatría."""
+    label = (service_label or "").lower()
+    if "psiquiatr" in label:
+        return "psiquiatria"
+    if "medicina general" in label:
+        return "medicina_general"
+    return None
 
 
 def iniciar_cancelacion(telefono: str, mensaje_id: str = None):
-    """Busca el turno de Medicina General más próximo del paciente. Con
-    24hs o más de anticipación, CANCELA automáticamente y devuelve
-    `accion: "turno_cancelado"`. Con menos de 24hs, o si hay cualquier
-    ambigüedad (0 turnos futuros, o más de uno), deriva a una persona sin
-    tocar nada -- nunca cancela algo que no esté clarísimo. Psiquiatría
-    queda afuera a propósito, tiene su propio manejo en DrApp. None (no
-    dict) si DrApp no está configurado."""
-    cfg = _config()
-    if cfg is None:
+    """Busca el turno (Medicina General o Psiquiatría) más próximo del
+    paciente. Con 24hs o más de anticipación, CANCELA automáticamente y
+    devuelve `accion: "turno_cancelado"`. Con menos de 24hs, o si hay
+    cualquier ambigüedad (0 turnos futuros, o más de uno), deriva a una
+    persona sin tocar nada -- nunca cancela algo que no esté clarísimo.
+    None (no dict) si DrApp no está configurado."""
+    if not _drapp_activo():
         return None
 
     try:
@@ -482,24 +642,29 @@ def _cancelar_para_paciente(conv_id, paciente):
         return _sin_accion("Tuvimos un problema para buscar tu turno -- ya avisamos al consultorio para que se comunique con vos.")
 
     ahora = datetime.datetime.now()
-    futuros_medgral = []
+    futuros = []
     for t in turnos:
         if t.get("status") != "booked":
             continue
-        if "psiquiatr" in (t.get("service", {}).get("label", "") or "").lower():
+        # v0.2.7 (20/08) -- antes se excluía Psiquiatría a propósito (no se
+        # cancelaba por WhatsApp) -- ahora se incluye, pero SOLO Medicina
+        # General/Psiquiatría; cualquier otra especialidad (si comparte
+        # cuenta de DrApp) se ignora, este bot no la gestiona.
+        especialidad = _especialidad_de_label((t.get("service") or {}).get("label"))
+        if especialidad is None:
             continue
         try:
             turno_dt = datetime.datetime.strptime(f"{t['day']} {t['time']}", "%Y-%m-%d %H:%M")
         except (KeyError, ValueError, TypeError):
             continue
         if turno_dt > ahora:
-            futuros_medgral.append((t, turno_dt))
+            futuros.append((t, turno_dt, especialidad))
 
-    if len(futuros_medgral) == 0:
+    if len(futuros) == 0:
         if conv_id:
             _marcar_conversacion(conv_id, "derivado")
-        return _sin_accion("No encontré ningún turno de Medicina General a tu nombre para cancelar -- ¿me confirmás la fecha, para poder ayudarte?")
-    if len(futuros_medgral) > 1:
+        return _sin_accion("No encontré ningún turno a tu nombre para cancelar -- ¿me confirmás la fecha, para poder ayudarte?")
+    if len(futuros) > 1:
         if conv_id:
             _marcar_conversacion(conv_id, "derivado")
         return _sin_accion(
@@ -507,7 +672,7 @@ def _cancelar_para_paciente(conv_id, paciente):
             "avisamos al consultorio para que confirme con vos cuál es."
         )
 
-    turno, turno_dt = futuros_medgral[0]
+    turno, turno_dt, especialidad = futuros[0]
     label = _label_legible(turno["day"], turno["time"])
     horas_hasta = (turno_dt - ahora).total_seconds() / 3600
 
@@ -527,7 +692,8 @@ def _cancelar_para_paciente(conv_id, paciente):
     if conv_id:
         _marcar_conversacion(conv_id, "cancelado", drapp_event_id=turno["id"])
     nombre = _primer_nombre(paciente)
-    saludo = f"Listo, {nombre} ✅" if nombre else "Listo ✅"
+    emoji = "🤍" if especialidad == "psiquiatria" else "✅"
+    saludo = f"Listo, {nombre} {emoji}" if nombre else f"Listo {emoji}"
     return {
         "texto": f"{saludo} Cancelamos tu turno del {label}. Si querés reprogramar, escribinos cuando quieras -- va a ser un gusto ayudarte. Consultorio Dr. Nicolás Buso.",
         "accion": "turno_cancelado",

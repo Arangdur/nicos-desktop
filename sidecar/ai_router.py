@@ -979,6 +979,146 @@ def interpretar_preferencia_fecha(texto: str, provider: str = None) -> dict:
     return {"outcome": "both_failed", "error": combined_error, "attempts": attempts}
 
 
+# v0.2.7 (20/08) -- Fase de Psiquiatría por WhatsApp: el consultorio ahora
+# agenda dos especialidades por WhatsApp (antes solo Medicina General), así
+# que hace falta saber cuál de las dos pide el paciente -- o si pide otra
+# especialidad que el consultorio deriva a otro número (ver
+# turnos_conversacion.py, decisión de diseño confirmada con Nicolás).
+ESPECIALIDAD_SYSTEM_PROMPT = """Un paciente le escribió al consultorio pidiendo un turno. El \
+consultorio del Dr. Buso da turnos directamente para Medicina General y Psiquiatría -- otras \
+especialidades (oftalmología, cardiología, ginecología, neurología, endocrinología) las deriva \
+a otro consultorio.
+
+El mensaje puede ser (a) un pedido de turno en texto libre que ya deja clara la especialidad, o \
+(b) una respuesta a un menú que le mandamos con estas opciones:
+1) Medicina General
+2) Psiquiatría
+3) Otros turnos
+
+Devolvé "medicina_general" si pide un chequeo general, un médico clínico, o eligió la opción 1.
+Devolvé "psiquiatria" si menciona psiquiatría, psiquiatra, salud mental, terapia, o eligió la \
+opción 2.
+Devolvé "otras_especialidades" si menciona explícitamente oftalmología, cardiología, ginecología, \
+neurología, endocrinología u otra especialidad distinta a las dos de arriba, o eligió la opción 3.
+Devolvé null si el mensaje no da ninguna pista de cuál especialidad quiere (ej. "quiero un turno" \
+sin más detalle, o algo que no tiene nada que ver con esto).
+
+NUNCA asumas Medicina General por default -- si no está claro, devolvé null."""
+
+ESPECIALIDAD_JSON_SCHEMA = {
+    "name": "especialidad_turno",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "especialidad": {"type": ["string", "null"]},
+        },
+        "required": ["especialidad"],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
+ESPECIALIDADES_VALIDAS = {"medicina_general", "psiquiatria", "otras_especialidades"}
+
+
+def _validate_especialidad_shape(data):
+    if not isinstance(data, dict):
+        return f"la respuesta no es un objeto JSON (vino {type(data).__name__})"
+    if "especialidad" not in data:
+        return "falta el campo 'especialidad'"
+    especialidad = data["especialidad"]
+    if especialidad is not None and especialidad not in ESPECIALIDADES_VALIDAS:
+        return f"'especialidad' inválida: {especialidad!r} (esperado {sorted(ESPECIALIDADES_VALIDAS)} o null)"
+    return None
+
+
+def _try_interpretar_especialidad(provider_name: str, texto: str) -> dict:
+    if provider_name == "openai":
+        client = _get_openai_client()
+        if client is None:
+            return {"status": "auth_error", "provider": "openai", "error": _openai_error}
+        try:
+            resp = client.chat.completions.create(
+                model=os.getenv("OPENAI_MODEL", "gpt-5"),
+                messages=[
+                    {"role": "system", "content": ESPECIALIDAD_SYSTEM_PROMPT},
+                    {"role": "user", "content": texto},
+                ],
+                response_format={"type": "json_schema", "json_schema": ESPECIALIDAD_JSON_SCHEMA},
+            )
+            raw_content = resp.choices[0].message.content
+            try:
+                data = json.loads(raw_content)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"status": "malformed", "provider": "openai", "error": f"JSON inválido: {e}"}
+        except Exception as e:
+            status = "auth_error" if _classify_exception(e) == "auth" else "transient_error"
+            return {"status": status, "provider": "openai", "error": f"{type(e).__name__}: {e}"}
+    else:
+        client = _get_claude_client()
+        if client is None:
+            return {"status": "auth_error", "provider": "claude", "error": _claude_error}
+        try:
+            resp = client.messages.create(
+                model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5"),
+                max_tokens=200,
+                system=ESPECIALIDAD_SYSTEM_PROMPT,
+                tools=[{
+                    "name": "especialidad_turno",
+                    "description": "Qué especialidad pide el paciente, o null si no está claro.",
+                    "input_schema": ESPECIALIDAD_JSON_SCHEMA["schema"],
+                }],
+                tool_choice={"type": "tool", "name": "especialidad_turno"},
+                messages=[{"role": "user", "content": texto}],
+            )
+            tool_block = next((b for b in resp.content if b.type == "tool_use"), None)
+            if tool_block is None:
+                return {"status": "malformed", "provider": "claude", "error": "la respuesta no incluyó el tool_use esperado"}
+            data = tool_block.input
+        except Exception as e:
+            status = "auth_error" if _classify_exception(e) == "auth" else "transient_error"
+            return {"status": status, "provider": "claude", "error": f"{type(e).__name__}: {e}"}
+
+    shape_error = _validate_especialidad_shape(data)
+    if shape_error:
+        return {"status": "malformed", "provider": provider_name, "error": shape_error}
+    return {"status": "success", "provider": provider_name, "data": data}
+
+
+def interpretar_especialidad(texto: str, provider: str = None) -> dict:
+    """Mismo contrato 'outcome' que el resto del router. `data['especialidad']`
+    es 'medicina_general'/'psiquiatria'/'otras_especialidades', o None si el
+    mensaje no aclara cuál. Sirve tanto para un pedido en texto libre como
+    para interpretar la respuesta al menú 1/2/3 (ver turnos_conversacion.py)."""
+    provider = provider or get_provider_for("interpretar_especialidad", default="claude")
+    alternate = "claude" if provider == "openai" else "openai"
+
+    attempts = []
+    first = _try_interpretar_especialidad(provider, texto)
+    attempts.append(first)
+
+    if first["status"] == "success":
+        return {"outcome": "success", "data": first["data"], "provider": provider, "attempts": attempts}
+
+    if first["status"] == "auth_error":
+        return {"outcome": "auth_error", "provider": provider, "error": first["error"], "attempts": attempts}
+
+    if not get_provider_matrix().get("fallback_on_primary_failure", True):
+        return {"outcome": "both_failed", "error": first["error"], "attempts": attempts}
+
+    second = _try_interpretar_especialidad(alternate, texto)
+    attempts.append(second)
+
+    if second["status"] == "success":
+        return {
+            "outcome": "success", "data": second["data"], "provider": alternate,
+            "fell_back_from": provider, "attempts": attempts,
+        }
+
+    combined_error = f"{provider}: {first['error']} | {alternate}: {second['error']}"
+    return {"outcome": "both_failed", "error": combined_error, "attempts": attempts}
+
+
 # v0.2.6 -- extracción de pedidos de factura para el bot de facturación ARCA
 # (ver CFO y Decisiones Estrategicas/Proyecto_Facturacion_WhatsApp_ARCA.md).
 # Mismo patrón de resiliencia que extract()/clasificar_y_redactar_mensaje().

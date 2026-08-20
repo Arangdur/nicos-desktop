@@ -101,17 +101,20 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
       <p class="help-text">
         Para que el bot pueda ofrecer horarios reales y crear/cancelar el turno solo cuando
         el paciente confirma por escrito. El Resource ID sos vos como profesional dentro de tu
-        cuenta de DrApp (ej. <code>resources/8c8a2304</code>) y el Service Key identifica
-        "Medicina General / Consulta" (ej. <code>pms_specialties:medicina-general/pms_practices:consulta</code>)
-        -- los dos se ven en la respuesta de <code>GET /teams/&lt;team&gt;/resources</code> y
-        <code>/services</code> de la API de DrApp. Sin estos dos campos, el bot sigue
-        respondiendo "alguien te va a confirmar" como hasta ahora -- no rompe nada, solo no
-        ofrece horarios reales todavía.
+        cuenta de DrApp (ej. <code>resources/8c8a2304</code>) y cada Service Key identifica una
+        especialidad (ej. <code>pms_specialties:medicina-general/pms_practices:consulta</code>)
+        -- se ven en la respuesta de <code>GET /teams/&lt;team&gt;/resources</code> y
+        <code>/services</code> de la API de DrApp. Sin Medicina General configurada, el bot
+        sigue respondiendo "alguien te va a confirmar" como hasta ahora -- no rompe nada.
+        Psiquiatría es opcional: sin ese campo, el menú de especialidad solo ofrece Medicina
+        General y "otros turnos".
       </p>
       <label>Resource ID</label>
       <input type="text" id="drapp-resource-id" value="${current.DRAPP_RESOURCE_ID || ''}" placeholder="resources/8c8a2304">
       <label>Service Key — Medicina General</label>
       <input type="text" id="drapp-service-key" value="${current.DRAPP_SERVICE_KEY_MEDICINA_GENERAL || ''}" placeholder="pms_specialties:medicina-general/pms_practices:consulta">
+      <label>Service Key — Psiquiatría</label>
+      <input type="text" id="drapp-service-key-psiquiatria" value="${current.DRAPP_SERVICE_KEY_PSIQUIATRIA || ''}" placeholder="pms_specialties:psiquiatria/pms_practices:consulta">
     </div>
 
     <div class="card">
@@ -189,6 +192,7 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
       DRAPP_TEAM_ID: containerEl.querySelector('#drapp-team').value.trim(),
       DRAPP_RESOURCE_ID: containerEl.querySelector('#drapp-resource-id').value.trim(),
       DRAPP_SERVICE_KEY_MEDICINA_GENERAL: containerEl.querySelector('#drapp-service-key').value.trim(),
+      DRAPP_SERVICE_KEY_PSIQUIATRIA: containerEl.querySelector('#drapp-service-key-psiquiatria').value.trim(),
       TWILIO_WEBHOOK_BASE_URL: containerEl.querySelector('#twilio-webhook-base').value.trim().replace(/\/$/, ''),
       CONSULTORIO_WHATSAPP_NUMERO: containerEl.querySelector('#consultorio-whatsapp').value.trim(),
       FACTURACION_TELEFONOS_AUTORIZADOS: containerEl.querySelector('#facturacion-telefonos').value.trim(),

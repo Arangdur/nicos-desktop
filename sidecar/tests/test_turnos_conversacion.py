@@ -36,7 +36,14 @@ import drapp_client  # noqa: E402
 import mensajes_whatsapp  # noqa: E402
 import turnos_conversacion  # noqa: E402
 
-DRAPP_ENV = {"DRAPP_RESOURCE_ID": "resources/8c8a2304", "DRAPP_SERVICE_KEY_MEDICINA_GENERAL": "pms_specialties:medicina-general/pms_practices:consulta"}
+DRAPP_ENV = {
+    "DRAPP_RESOURCE_ID": "resources/8c8a2304",
+    "DRAPP_SERVICE_KEY_MEDICINA_GENERAL": "pms_specialties:medicina-general/pms_practices:consulta",
+    "DRAPP_SERVICE_KEY_PSIQUIATRIA": "pms_specialties:psiquiatria/pms_practices:consulta",
+}
+
+ESP_MEDICINA_GENERAL = {"outcome": "success", "data": {"especialidad": "medicina_general"}}
+ESP_PSIQUIATRIA = {"outcome": "success", "data": {"especialidad": "psiquiatria"}}
 
 DISPONIBILIDAD_FAKE = {
     "slots": {
@@ -53,6 +60,16 @@ DISPONIBILIDAD_FAKE = {
         "2026-08-20": {"11:00": {"capacity": 1}, "11:10": {"capacity": 1}},
         "2026-08-21": {"10:00": {"capacity": 1}},
         "2026-08-24": {"11:00": {"capacity": 1}},
+    },
+}
+
+# v0.2.7 (20/08) -- Fase de Psiquiatría: mismo criterio, horarios dentro de
+# la franja real de Posse (ver FRANJA_POSSE_PSIQUIATRIA) -- viernes 8:30-9:30
+# y lunes 15-18:30.
+DISPONIBILIDAD_PSIQUIATRIA_FAKE = {
+    "slots": {
+        "2026-08-21": {"08:30": {"capacity": 1}},  # viernes
+        "2026-08-24": {"15:30": {"capacity": 1}},  # lunes
     },
 }
 
@@ -76,6 +93,12 @@ class _BaseTemp(unittest.TestCase):
 
 
 class TestOfrecerHorarios(_BaseTemp):
+    """v0.2.7 (20/08) -- estos tests ejercitan `_ofrecer_horarios_especialidad`
+    directamente (la mecánica de armar la oferta para UNA especialidad ya
+    conocida: capacity, franja, preferencia de fecha, variedad de días) --
+    la detección de especialidad en sí (menú, salteo, "otras especialidades")
+    tiene su propia clase, TestDeteccionEspecialidad."""
+
     def test_sin_drapp_configurado_devuelve_none(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("DRAPP_RESOURCE_ID", None)
@@ -86,7 +109,7 @@ class TestOfrecerHorarios(_BaseTemp):
     def test_arma_hasta_tres_opciones_reales(self, mock_disp):
         mock_disp.return_value = DISPONIBILIDAD_FAKE
         with patch.dict(os.environ, DRAPP_ENV):
-            resultado = turnos_conversacion.ofrecer_horarios("+5493584390002")
+            resultado = turnos_conversacion._ofrecer_horarios_especialidad("medicina_general", "+5493584390002")
         self.assertIsNotNone(resultado)
         self.assertIsNone(resultado["accion"])  # ofrecer nunca ejecuta nada en DrApp
         texto = resultado["texto"]
@@ -120,7 +143,7 @@ class TestOfrecerHorarios(_BaseTemp):
         }
         mock_disp.return_value = disponibilidad
         with patch.dict(os.environ, DRAPP_ENV):
-            resultado = turnos_conversacion.ofrecer_horarios("+5493584390006")
+            resultado = turnos_conversacion._ofrecer_horarios_especialidad("medicina_general", "+5493584390006")
         self.assertIsNotNone(resultado)
         conv = turnos_conversacion.hay_conversacion_activa("+5493584390006")
         opciones = json.loads(conv["opciones_json"])
@@ -145,7 +168,7 @@ class TestOfrecerHorarios(_BaseTemp):
         }
         mock_disp.return_value = disponibilidad
         with patch.dict(os.environ, DRAPP_ENV):
-            resultado = turnos_conversacion.ofrecer_horarios("+5493584390008")
+            resultado = turnos_conversacion._ofrecer_horarios_especialidad("medicina_general", "+5493584390008")
         self.assertIsNotNone(resultado)
         conv = turnos_conversacion.hay_conversacion_activa("+5493584390008")
         opciones = json.loads(conv["opciones_json"])
@@ -157,7 +180,7 @@ class TestOfrecerHorarios(_BaseTemp):
     def test_sin_horarios_disponibles_no_crea_conversacion(self, mock_disp):
         mock_disp.return_value = {"slots": {}}
         with patch.dict(os.environ, DRAPP_ENV):
-            resultado = turnos_conversacion.ofrecer_horarios("+5493584390003")
+            resultado = turnos_conversacion._ofrecer_horarios_especialidad("medicina_general", "+5493584390003")
         self.assertIn("no tenemos horarios", resultado["texto"].lower())
         self.assertIsNone(resultado["accion"])
         self.assertIsNone(turnos_conversacion.hay_conversacion_activa("+5493584390003"))
@@ -165,7 +188,7 @@ class TestOfrecerHorarios(_BaseTemp):
     @patch("drapp_client.consultar_disponibilidad", side_effect=drapp_client.DrAppAPIError("server_error", "falló", 500))
     def test_error_de_drapp_devuelve_none(self, mock_disp):
         with patch.dict(os.environ, DRAPP_ENV):
-            self.assertIsNone(turnos_conversacion.ofrecer_horarios("+5493584390004"))
+            self.assertIsNone(turnos_conversacion._ofrecer_horarios_especialidad("medicina_general", "+5493584390004"))
 
     @patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE)
     @patch("ai_router.interpretar_preferencia_fecha", return_value={"outcome": "success", "data": {"dias_desde_hoy": 7}})
@@ -174,7 +197,7 @@ class TestOfrecerHorarios(_BaseTemp):
         # viene" tiene que buscarse desde esa fecha, no desde hoy.
         import datetime
         with patch.dict(os.environ, DRAPP_ENV):
-            turnos_conversacion.ofrecer_horarios("+5493584390005", "quiero un turno para la semana que viene")
+            turnos_conversacion._ofrecer_horarios_especialidad("medicina_general", "+5493584390005", "quiero un turno para la semana que viene")
 
         mock_pref.assert_called_once_with("quiero un turno para la semana que viene")
         desde_usado = mock_disp.call_args[0][2]  # consultar_disponibilidad(resource, service, desde, hasta)
@@ -185,14 +208,14 @@ class TestOfrecerHorarios(_BaseTemp):
     def test_sin_preferencia_de_fecha_busca_desde_hoy(self, mock_disp):
         import datetime
         with patch.dict(os.environ, DRAPP_ENV):
-            turnos_conversacion.ofrecer_horarios("+5493584390006", "quiero un turno")
+            turnos_conversacion._ofrecer_horarios_especialidad("medicina_general", "+5493584390006", "quiero un turno")
         desde_usado = mock_disp.call_args[0][2]
         self.assertEqual(desde_usado, datetime.datetime.now().date().isoformat())
 
     @patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE)
     def test_ofrece_un_horario_por_dia_distinto_no_todos_seguidos(self, mock_disp):
         with patch.dict(os.environ, DRAPP_ENV):
-            resultado = turnos_conversacion.ofrecer_horarios("+5493584390007")
+            resultado = turnos_conversacion._ofrecer_horarios_especialidad("medicina_general", "+5493584390007")
         conv = turnos_conversacion.hay_conversacion_activa("+5493584390007")
         opciones = json.loads(conv["opciones_json"])
         dias = [o["day"] for o in opciones]
@@ -200,11 +223,102 @@ class TestOfrecerHorarios(_BaseTemp):
         self.assertNotIn("11:10", resultado["texto"])  # el 2do horario del mismo día no se ofrece
 
 
+class TestDeteccionEspecialidad(_BaseTemp):
+    """v0.2.7 (20/08) -- Fase de Psiquiatría: `ofrecer_horarios` (punto de
+    entrada público) ahora tiene que saber primero QUÉ especialidad pide el
+    paciente -- estos tests cubren esa capa (menú, salteo, derivación a
+    otras especialidades), no la mecánica de armar la oferta en sí (eso ya
+    lo cubre TestOfrecerHorarios)."""
+
+    def _conv_de(self, telefono):
+        conn = db.get_connection()
+        return dict(conn.execute(
+            "SELECT * FROM turnos_conversacion WHERE telefono = ? ORDER BY creado_at DESC LIMIT 1", (telefono,)
+        ).fetchone())
+
+    @patch("ai_router.interpretar_especialidad", return_value={"outcome": "success", "data": {"especialidad": None}})
+    def test_mensaje_ambiguo_muestra_el_menu(self, mock_esp):
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.ofrecer_horarios("+5493584390040", "quiero un turno")
+        self.assertIn("1) Medicina General", resultado["texto"])
+        self.assertIn("2) Psiquiatría", resultado["texto"])
+        self.assertIn("3) Otros turnos", resultado["texto"])
+        self.assertIsNone(resultado["accion"])
+        conv = self._conv_de("+5493584390040")
+        self.assertEqual(conv["estado"], "esperando_especialidad")
+
+    @patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE)
+    @patch("ai_router.interpretar_especialidad", return_value=ESP_MEDICINA_GENERAL)
+    def test_mensaje_que_ya_dice_medicina_general_salta_el_menu(self, mock_esp, mock_disp):
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.ofrecer_horarios("+5493584390041", "necesito un chequeo general")
+        self.assertIn("1)", resultado["texto"])
+        self.assertNotIn("¿Para qué especialidad", resultado["texto"])
+        conv = self._conv_de("+5493584390041")
+        self.assertEqual(conv["estado"], "esperando_eleccion")
+        self.assertEqual(conv["especialidad"], "medicina_general")
+
+    @patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_PSIQUIATRIA_FAKE)
+    @patch("ai_router.interpretar_especialidad", return_value=ESP_PSIQUIATRIA)
+    def test_mensaje_que_ya_dice_psiquiatria_salta_el_menu(self, mock_esp, mock_disp):
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.ofrecer_horarios("+5493584390042", "necesito turno con el psiquiatra")
+        self.assertIn("Psiquiatría", resultado["texto"])
+        conv = self._conv_de("+5493584390042")
+        self.assertEqual(conv["estado"], "esperando_eleccion")
+        self.assertEqual(conv["especialidad"], "psiquiatria")
+
+    @patch("ai_router.interpretar_especialidad", return_value={"outcome": "success", "data": {"especialidad": "otras_especialidades"}})
+    def test_otras_especialidades_deriva_a_stefania_sin_crear_conversacion(self, mock_esp):
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.ofrecer_horarios("+5493584390043", "necesito turno con el cardiólogo")
+        self.assertIn("Stefania Rufinetto", resultado["texto"])
+        self.assertIn("3537", resultado["texto"])
+        self.assertIsNone(resultado["accion"])
+        self.assertIsNone(turnos_conversacion.hay_conversacion_activa("+5493584390043"))
+
+    @patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_PSIQUIATRIA_FAKE)
+    @patch("ai_router.interpretar_especialidad")
+    def test_respuesta_al_menu_con_el_numero_2_ofrece_psiquiatria(self, mock_esp, mock_disp):
+        # v0.2.7 (20/08) -- responder "2" al menú tiene que interpretarse
+        # igual que si hubiera dicho "psiquiatría" en texto libre -- mismo
+        # clasificador, mismo resultado.
+        telefono = "+5493584390044"
+        mock_esp.return_value = {"outcome": "success", "data": {"especialidad": None}}
+        with patch.dict(os.environ, DRAPP_ENV):
+            turnos_conversacion.ofrecer_horarios(telefono, "quiero un turno")  # crea esperando_especialidad
+        self.assertEqual(self._conv_de(telefono)["estado"], "esperando_especialidad")
+
+        mock_esp.return_value = ESP_PSIQUIATRIA
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "2")
+
+        self.assertIn("Psiquiatría", resultado["texto"])
+        conv = self._conv_de(telefono)
+        self.assertEqual(conv["estado"], "esperando_eleccion")
+        self.assertEqual(conv["especialidad"], "psiquiatria")
+
+    @patch("ai_router.interpretar_especialidad")
+    def test_respuesta_al_menu_no_clara_vuelve_a_preguntar(self, mock_esp):
+        telefono = "+5493584390045"
+        mock_esp.return_value = {"outcome": "success", "data": {"especialidad": None}}
+        with patch.dict(os.environ, DRAPP_ENV):
+            turnos_conversacion.ofrecer_horarios(telefono, "quiero un turno")
+
+        resultado = turnos_conversacion.procesar_eleccion(telefono, "no sé")
+        self.assertIn("1 (Medicina General)", resultado["texto"])
+        self.assertEqual(self._conv_de(telefono)["estado"], "esperando_especialidad")  # sigue esperando
+
+
 class TestProcesarEleccion(_BaseTemp):
     def _ofrecer(self, telefono="+5493584390010", mensaje_id=None):
+        # v0.2.7 (20/08) -- llama directo a la versión ya acotada a Medicina
+        # General -- estos tests son sobre qué pasa DESPUÉS de tener una
+        # oferta (elegir, identificar, reservar), no sobre la detección de
+        # especialidad en sí (ver TestDeteccionEspecialidad).
         with patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE):
             with patch.dict(os.environ, DRAPP_ENV):
-                turnos_conversacion.ofrecer_horarios(telefono, mensaje_id=mensaje_id)
+                turnos_conversacion._ofrecer_horarios_especialidad("medicina_general", telefono, mensaje_id=mensaje_id)
         return telefono
 
     def test_sin_conversacion_activa_devuelve_none(self):
@@ -329,6 +443,59 @@ class TestProcesarEleccion(_BaseTemp):
         self.assertNotIn("confirmado", resultado["texto"].lower())
         conv = self._conv_de(telefono)
         self.assertEqual(conv["estado"], "derivado")
+
+    @patch("drapp_client.crear_turno")
+    @patch("drapp_client.buscar_paciente_por_telefono", return_value={"id": "consumers/xyz789"})
+    @patch("ai_router.interpretar_eleccion_turno", return_value={"outcome": "success", "data": {"eleccion": 0}})
+    def test_psiquiatria_reserva_de_punta_a_punta_en_posse(self, mock_interp, mock_buscar, mock_crear):
+        # v0.2.7 (20/08) -- Fase de Psiquiatría: mismo flujo end-to-end que
+        # Medicina General, pero apuntando a Posse -- service key, franja,
+        # y red de seguridad de ubicación todas correctas para esta
+        # especialidad.
+        telefono = "+5493584390050"
+        with patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_PSIQUIATRIA_FAKE):
+            with patch.dict(os.environ, DRAPP_ENV):
+                turnos_conversacion._ofrecer_horarios_especialidad("psiquiatria", telefono)
+
+        mock_crear.return_value = {
+            "id": "events/psi-nuevo",
+            "location": {"id": "place-7mtlojwwiev0sezrafw9oe", "label": "P-SIA", "address": "Justiniano Posse"},
+        }
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "el primero")
+
+        self.assertIn("confirmado", resultado["texto"].lower())
+        self.assertEqual(resultado["accion"], "turno_creado")
+        mock_crear.assert_called_once_with(
+            "resources/8c8a2304", "pms_specialties:psiquiatria/pms_practices:consulta",
+            "consumers/xyz789", "2026-08-21", "08:30",
+        )
+        conv = self._conv_de(telefono)
+        self.assertEqual(conv["estado"], "confirmado")
+
+    @patch("drapp_client.cancelar_turno")
+    @patch("drapp_client.crear_turno")
+    @patch("drapp_client.buscar_paciente_por_telefono", return_value={"id": "consumers/xyz789"})
+    @patch("ai_router.interpretar_eleccion_turno", return_value={"outcome": "success", "data": {"eleccion": 0}})
+    def test_psiquiatria_en_consultorio_equivocado_tambien_se_cancela_sola(self, mock_interp, mock_buscar, mock_crear, mock_cancelar):
+        # La red de seguridad de ubicación también corre para Psiquiatría --
+        # si DrApp la asigna a Ordoñez (fuera de la excepción mensual, que
+        # este bot no maneja), se cancela sola igual que Medicina General.
+        telefono = "+5493584390051"
+        with patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_PSIQUIATRIA_FAKE):
+            with patch.dict(os.environ, DRAPP_ENV):
+                turnos_conversacion._ofrecer_horarios_especialidad("psiquiatria", telefono)
+
+        mock_crear.return_value = {
+            "id": "events/psi-mal-asignado",
+            "location": {"id": "place-46ace5", "label": "Aneit", "address": "Ordoñez"},
+        }
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "el primero")
+
+        mock_cancelar.assert_called_once_with("events/psi-mal-asignado")
+        self.assertIsNone(resultado["accion"])
+        self.assertEqual(self._conv_de(telefono)["estado"], "derivado")
 
     def _conv_de(self, telefono):
         conn = db.get_connection()
@@ -591,7 +758,10 @@ class TestIniciarCancelacion(_BaseTemp):
     @patch("drapp_client.cancelar_turno")
     @patch("drapp_client.listar_turnos_de_paciente")
     @patch("drapp_client.buscar_paciente_por_telefono", return_value={"id": "consumers/x"})
-    def test_psiquiatria_queda_afuera(self, mock_buscar, mock_listar, mock_cancelar):
+    def test_psiquiatria_tambien_se_puede_cancelar(self, mock_buscar, mock_listar, mock_cancelar):
+        # v0.2.7 (20/08) -- antes Psiquiatría quedaba afuera a propósito (no
+        # se agendaba por WhatsApp); ahora que sí, también se puede
+        # cancelar -- misma ventana de 24hs, confirmado con Nicolás.
         import datetime
         en_3_dias = (datetime.datetime.now() + datetime.timedelta(days=3))
         mock_listar.return_value = [{
@@ -601,7 +771,27 @@ class TestIniciarCancelacion(_BaseTemp):
         }]
         with patch.dict(os.environ, DRAPP_ENV):
             resultado = turnos_conversacion.iniciar_cancelacion("+5493584390026")
-        self.assertIn("no encontré", resultado["texto"].lower())  # no hay turnos de Medicina General
+        self.assertIn("cancelamos", resultado["texto"].lower())
+        self.assertEqual(resultado["accion"], "turno_cancelado")
+        mock_cancelar.assert_called_once_with("events/psi")
+
+    @patch("drapp_client.cancelar_turno")
+    @patch("drapp_client.listar_turnos_de_paciente")
+    @patch("drapp_client.buscar_paciente_por_telefono", return_value={"id": "consumers/x"})
+    def test_otra_especialidad_no_se_cancela_por_este_bot(self, mock_buscar, mock_listar, mock_cancelar):
+        # Un turno de una especialidad que este bot no maneja (ej.
+        # Cardiología, si comparte cuenta de DrApp) se ignora -- nunca lo
+        # toca, aunque sea el único turno futuro del paciente.
+        import datetime
+        en_3_dias = (datetime.datetime.now() + datetime.timedelta(days=3))
+        mock_listar.return_value = [{
+            "id": "events/card", "status": "booked",
+            "service": {"label": "Cardiología / Consulta"},
+            "day": en_3_dias.strftime("%Y-%m-%d"), "time": en_3_dias.strftime("%H:%M"),
+        }]
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.iniciar_cancelacion("+5493584390029")
+        self.assertIn("no encontré", resultado["texto"].lower())
         self.assertIsNone(resultado["accion"])
         mock_cancelar.assert_not_called()
 
@@ -611,7 +801,7 @@ class TestIntegracionMensajesWhatsapp(_BaseTemp):
     def test_conversacion_activa_salta_la_clasificacion_generica(self, mock_clasificar):
         with patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE):
             with patch.dict(os.environ, DRAPP_ENV):
-                turnos_conversacion.ofrecer_horarios("+5493584390030")
+                turnos_conversacion._ofrecer_horarios_especialidad("medicina_general", "+5493584390030")
 
         mensaje_id = mensajes_whatsapp.registrar_mensaje_entrante("+5493584390030", "el segundo")["id"]
 
@@ -629,8 +819,9 @@ class TestIntegracionMensajesWhatsapp(_BaseTemp):
         self.assertEqual(mensaje["accion_drapp"], "turno_creado")  # el tag que ve Marianela/Nicolás
 
     @patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE)
+    @patch("ai_router.interpretar_especialidad", return_value=ESP_MEDICINA_GENERAL)
     @patch("ai_router.clasificar_y_redactar_mensaje")
-    def test_turno_nuevo_con_drapp_usa_horarios_reales(self, mock_clasificar, mock_disp):
+    def test_turno_nuevo_con_drapp_usa_horarios_reales(self, mock_clasificar, mock_esp, mock_disp):
         mock_clasificar.return_value = {
             "outcome": "success",
             "data": {"clasificacion": "turno_nuevo", "requiere_profesional": False, "urgente": False, "borrador_respuesta": "texto genérico de la IA"},
