@@ -37,8 +37,17 @@ a "Medicina General / Consulta" como servicio dentro de SU cuenta de
 DrApp. No hay forma genérica de inferir esto solo -- cada cuenta tiene sus
 propios IDs (ver hallazgo real del 20/08: la disponibilidad mezcla varios
 consultorios físicos en una sola grilla sin indicar cuál es cuál -- DrApp
-resuelve el lugar solo al crear el turno, no es algo que este código
-pueda ni necesite decidir).
+resuelve el lugar solo al crear el turno, no es un parámetro que
+`POST /events` acepte).
+
+v0.2.7 (20/08) -- Nicolás hace Medicina General SOLO en el consultorio de
+Ordoñez (Psiquiatría es aparte, en Posse -- pero Psiquiatría todavía no
+se agenda por WhatsApp, ver decisión de alcance). Como no se le puede
+pedir la ubicación a DrApp al crear el turno, `_reservar_turno` valida la
+ubicación que DEVUELVE después de crearlo -- si no es Ordoñez, cancela
+el turno solo y deriva, en vez de confirmarle al paciente un turno en el
+consultorio equivocado (se encontró un caso real así, cargado a mano
+fuera de este bot).
 """
 import datetime
 import json
@@ -59,6 +68,12 @@ DIAS_A_CONSULTAR_DISPONIBILIDAD = 14
 # explícitamente al rechazar (ver mensajes_whatsapp.rechazar) Y además
 # expira sola después de este tiempo, por si nadie la cierra a mano.
 CONVERSACION_VIGENCIA_HORAS = 4
+# v0.2.7 (20/08) -- confirmado cruzando turnos reales ya reservados contra
+# su dirección: "place-46ace5" es el consultorio de Ordoñez (aparece como
+# "Aneit" o "NovoGen Consultorio Médico" según el turno, mismo id físico).
+# Medicina General por WhatsApp NUNCA debe confirmar un turno en otro lado
+# -- ver _reservar_turno.
+UBICACION_ORDONEZ_ID = "place-46ace5"
 
 DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 MESES = [
@@ -315,6 +330,25 @@ def _reservar_turno(conv_id, resource_id, service_key, paciente, elegido):
     except drapp_client.DrAppAPIError:
         return _sin_accion("Tuvimos un problema para confirmar tu turno en el sistema -- ya avisamos al consultorio para que se comunique con vos.")
 
+    ubicacion = (turno or {}).get("location") or {}
+
+    # v0.2.7 (20/08) -- red de seguridad, hallazgo real: Medicina General es
+    # SOLO en Ordoñez, pero DrApp elige el consultorio en silencio al crear
+    # el turno (no es un parámetro que se le pueda pedir) -- ya se encontró
+    # un turno real cargado a mano en el consultorio equivocado. Si el que
+    # asignó no es Ordoñez, se cancela solo y se deriva -- nunca se le
+    # confirma al paciente un turno en el lugar que no le corresponde.
+    if ubicacion.get("id") and ubicacion["id"] != UBICACION_ORDONEZ_ID:
+        try:
+            drapp_client.cancelar_turno(turno["id"])
+        except drapp_client.DrAppAPIError:
+            pass  # de todas formas no se lo confirmamos al paciente
+        _marcar_conversacion(conv_id, "derivado")
+        return _sin_accion(
+            "Uy, tuvimos un problema para confirmar tu turno en el consultorio correcto 😅 "
+            "ya avisamos al consultorio para que se comunique con vos y lo resolvamos enseguida."
+        )
+
     _marcar_conversacion(conv_id, "confirmado", drapp_event_id=(turno or {}).get("id"))
     # v0.2.6 -- hallazgo real (21/08): la disponibilidad mezcla varios
     # consultorios físicos sin indicar cuál es cuál (ver ai_router/nota en
@@ -322,7 +356,6 @@ def _reservar_turno(conv_id, resource_id, service_key, paciente, elegido):
     # el turno. Antes no se lo comunicaba a nadie; el evento creado SÍ trae
     # la ubicación real, así que se la agregamos a la confirmación -- si es
     # la que no le sirve al paciente, puede reaccionar de inmediato.
-    ubicacion = (turno or {}).get("location") or {}
     lugar = ubicacion.get("label") or ubicacion.get("address")
     lugar_texto = f", en {lugar}" if lugar else ""
     nombre = _primer_nombre(paciente)

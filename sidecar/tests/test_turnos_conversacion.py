@@ -251,10 +251,37 @@ class TestProcesarEleccion(_BaseTemp):
         # consultorios sin indicar cuál es cuál -- el paciente tiene que
         # enterarse de dónde quedó el turno, no solo la hora.
         telefono = self._ofrecer()
-        mock_crear.return_value = {"id": "events/x", "location": {"label": "EL PUENTE", "address": "Calle 1 746, Ordoñez"}}
+        mock_crear.return_value = {
+            "id": "events/x",
+            "location": {"id": "place-46ace5", "label": "EL PUENTE", "address": "Calle 1 746, Ordoñez"},
+        }
         with patch.dict(os.environ, DRAPP_ENV):
             resultado = turnos_conversacion.procesar_eleccion(telefono, "el primero")
         self.assertIn("el puente", resultado["texto"].lower())
+
+    @patch("drapp_client.cancelar_turno")
+    @patch("drapp_client.crear_turno")
+    @patch("drapp_client.buscar_paciente_por_telefono", return_value={"id": "consumers/xyz789"})
+    @patch("ai_router.interpretar_eleccion_turno", return_value={"outcome": "success", "data": {"eleccion": 0}})
+    def test_turno_en_consultorio_equivocado_se_cancela_solo_y_no_se_confirma(self, mock_interp, mock_buscar, mock_crear, mock_cancelar):
+        # v0.2.7 (20/08) -- hallazgo real: Medicina General es solo en
+        # Ordoñez, pero DrApp elige el consultorio en silencio -- ya hubo un
+        # turno real cargado a mano en Posse por error. Si esto vuelve a
+        # pasar por WhatsApp, el bot tiene que cancelarlo solo, nunca
+        # confirmárselo al paciente.
+        telefono = self._ofrecer()
+        mock_crear.return_value = {
+            "id": "events/mal-asignado",
+            "location": {"id": "place-7mtlojwwiev0sezrafw9oe", "label": "P-SIA", "address": "Justiniano Posse"},
+        }
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "el primero")
+
+        mock_cancelar.assert_called_once_with("events/mal-asignado")
+        self.assertIsNone(resultado["accion"])
+        self.assertNotIn("confirmado", resultado["texto"].lower())
+        conv = self._conv_de(telefono)
+        self.assertEqual(conv["estado"], "derivado")
 
     def _conv_de(self, telefono):
         conn = db.get_connection()
