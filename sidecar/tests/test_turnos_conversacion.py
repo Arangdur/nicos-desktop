@@ -21,6 +21,7 @@ Usa base de datos temporal -- nunca toca nicos.db real.
 
 Uso: python3 sidecar/tests/test_turnos_conversacion.py
 """
+import datetime
 import json
 import os
 import sys
@@ -152,6 +153,37 @@ class TestProcesarEleccion(_BaseTemp):
 
     def test_sin_conversacion_activa_devuelve_none(self):
         self.assertIsNone(turnos_conversacion.procesar_eleccion("+5493584390099", "el segundo"))
+
+    def test_cerrar_conversacion_activa_la_cancela(self):
+        # v0.2.6 (21/08) -- hallazgo real: rechazar la oferta no cerraba
+        # la conversación -- el próximo mensaje quedaba atrapado.
+        telefono = self._ofrecer("+5493584390011")
+        self.assertIsNotNone(turnos_conversacion.hay_conversacion_activa(telefono))
+        turnos_conversacion.cerrar_conversacion_activa(telefono)
+        self.assertIsNone(turnos_conversacion.hay_conversacion_activa(telefono))
+        # Un mensaje nuevo de este teléfono ya no queda atrapado -- vuelve a
+        # ser tratado como "sin conversación activa".
+        self.assertIsNone(turnos_conversacion.procesar_eleccion(telefono, "hola buen día"))
+
+    def test_cerrar_conversacion_activa_es_no_op_sin_conversacion(self):
+        turnos_conversacion.cerrar_conversacion_activa("+5493584390012")  # no debe romper
+
+    def test_conversacion_vieja_expira_sola(self):
+        telefono = self._ofrecer("+5493584390013")
+        conn = db.get_connection()
+        # Simula que la conversación se creó hace más tiempo del permitido.
+        vencida = (
+            datetime.datetime.utcnow()
+            - datetime.timedelta(hours=turnos_conversacion.CONVERSACION_VIGENCIA_HORAS + 1)
+        ).isoformat()
+        conn.execute("UPDATE turnos_conversacion SET creado_at = ? WHERE telefono = ?", (vencida, telefono))
+        conn.commit()
+
+        self.assertIsNone(turnos_conversacion.hay_conversacion_activa(telefono))
+        conv = conn.execute(
+            "SELECT estado FROM turnos_conversacion WHERE telefono = ? ORDER BY creado_at DESC LIMIT 1", (telefono,)
+        ).fetchone()
+        self.assertEqual(conv["estado"], "expirado")
 
     @patch("drapp_client.crear_turno")
     @patch("drapp_client.buscar_paciente_por_telefono")

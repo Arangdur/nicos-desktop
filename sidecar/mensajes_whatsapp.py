@@ -226,4 +226,10 @@ def rechazar(mensaje_id: str, resuelto_by: str) -> dict:
         (now, resuelto_by, mensaje_id),
     )
     conn.commit()
+    # v0.2.6 -- hallazgo real (21/08): rechazar un mensaje de oferta/turno
+    # no cerraba la conversación de Fase C -- el próximo mensaje del mismo
+    # teléfono quedaba atrapado tratando de interpretarse como una
+    # elección de horario, aunque no tuviera nada que ver. No-op si no hay
+    # ninguna conversación activa para este teléfono.
+    turnos_conversacion.cerrar_conversacion_activa(mensaje["telefono"])
     return {"ok": True}

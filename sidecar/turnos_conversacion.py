@@ -52,6 +52,13 @@ import drapp_client
 VENTANA_CANCELACION_HORAS = 24
 CANTIDAD_OPCIONES_A_OFRECER = 3
 DIAS_A_CONSULTAR_DISPONIBILIDAD = 14
+# v0.2.6 (21/08) -- hallazgo real: rechazar el mensaje de oferta no cerraba
+# la conversación -- cualquier mensaje siguiente del mismo teléfono (aunque
+# no tuviera nada que ver, ej. "hola buen día") quedaba atrapado
+# intentando interpretarse como una elección de horario. Se cierra
+# explícitamente al rechazar (ver mensajes_whatsapp.rechazar) Y además
+# expira sola después de este tiempo, por si nadie la cierra a mano.
+CONVERSACION_VIGENCIA_HORAS = 4
 
 DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 MESES = [
@@ -97,7 +104,25 @@ def hay_conversacion_activa(telefono: str):
         "ORDER BY creado_at DESC LIMIT 1",
         (telefono,),
     ).fetchone()
-    return dict(row) if row else None
+    if row is None:
+        return None
+    conv = dict(row)
+    creado = datetime.datetime.fromisoformat(conv["creado_at"])
+    if (datetime.datetime.utcnow() - creado).total_seconds() > CONVERSACION_VIGENCIA_HORAS * 3600:
+        _marcar_conversacion(conv["id"], "expirado")
+        return None
+    return conv
+
+
+def cerrar_conversacion_activa(telefono: str):
+    """Cierra cualquier conversación de turno activa para este teléfono --
+    se llama al rechazar un mensaje (ver mensajes_whatsapp.rechazar) para
+    que el próximo mensaje de este paciente arranque de cero en vez de
+    quedar atrapado tratando de interpretarse como una elección de
+    horario que ya no corresponde. No-op si no hay ninguna activa."""
+    conv = hay_conversacion_activa(telefono)
+    if conv is not None:
+        _marcar_conversacion(conv["id"], "cancelado")
 
 
 def _crear_conversacion(telefono, tipo, estado, opciones=None, eleccion_index=None):
