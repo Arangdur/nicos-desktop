@@ -42,11 +42,16 @@ DISPONIBILIDAD_FAKE = {
     "slots": {
         # v0.2.6 (21/08) -- ofrecer_horarios ahora toma UN horario por día
         # distinto (no todos seguidos del mismo día) -- 3 días separados
-        # para que el test siga cubriendo eso. El 10:10 del primer día
+        # para que el test siga cubriendo eso. El 11:10 del primer día
         # queda a propósito para confirmar que NO se ofrece (se prioriza
         # variedad de días sobre el segundo horario del mismo día).
-        "2026-08-20": {"10:00": {"capacity": 1}, "10:10": {"capacity": 1}},
-        "2026-08-21": {"09:00": {"capacity": 1}},
+        # v0.2.7 (20/08) -- horarios ajustados a la franja real de Ordoñez
+        # (ver FRANJA_ORDONEZ_MEDICINA_GENERAL): 2026-08-20 es jueves
+        # (11:00-14:00), 2026-08-21 es viernes y 2026-08-24 es lunes
+        # (ambos 10:00-14:00) -- fuera de esa franja el horario se filtra
+        # aunque tenga capacity, así que estos tienen que caer adentro.
+        "2026-08-20": {"11:00": {"capacity": 1}, "11:10": {"capacity": 1}},
+        "2026-08-21": {"10:00": {"capacity": 1}},
         "2026-08-24": {"11:00": {"capacity": 1}},
     },
 }
@@ -95,7 +100,7 @@ class TestOfrecerHorarios(_BaseTemp):
         self.assertEqual(len(opciones), 3)
         # Nunca un horario inventado -- tiene que salir tal cual de la disponibilidad mockeada.
         self.assertEqual(opciones[0]["day"], "2026-08-20")
-        self.assertEqual(opciones[0]["time"], "10:00")
+        self.assertEqual(opciones[0]["time"], "11:00")
 
     @patch("drapp_client.consultar_disponibilidad")
     def test_ignora_horarios_sin_capacidad_real(self, mock_disp):
@@ -109,7 +114,7 @@ class TestOfrecerHorarios(_BaseTemp):
                 "2026-08-20": {
                     "11:00": {"capacity": -1},  # ya reservado / bloqueado
                     "11:15": {"capacity": 0},   # ocupado
-                    "13:15": {"capacity": 1},   # el único de verdad libre
+                    "12:15": {"capacity": 1},   # el único de verdad libre (dentro de la franja de Aneit, jueves 11-13)
                 },
             },
         }
@@ -120,7 +125,33 @@ class TestOfrecerHorarios(_BaseTemp):
         conv = turnos_conversacion.hay_conversacion_activa("+5493584390006")
         opciones = json.loads(conv["opciones_json"])
         self.assertEqual(len(opciones), 1)
-        self.assertEqual(opciones[0]["time"], "13:15")
+        self.assertEqual(opciones[0]["time"], "12:15")
+
+    @patch("drapp_client.consultar_disponibilidad")
+    def test_ignora_horarios_fuera_de_la_franja_real_de_ordonez(self, mock_disp):
+        # v0.2.7 (20/08) -- hallazgo real (Nicolás, mirando la config real de
+        # DrApp): Medicina General en Ordoñez es solo lunes/martes/viernes
+        # 10-14hs y jueves 11-14hs -- nunca miércoles. La grilla de
+        # disponibilidad mezcla Ordoñez y Posse sin indicar cuál es cuál, así
+        # que un horario con capacity igual puede no ser de Ordoñez.
+        disponibilidad = {
+            "slots": {
+                "2026-08-19": {"10:00": {"capacity": 1}},  # miércoles -- nunca hay Ordoñez
+                "2026-08-20": {
+                    "09:00": {"capacity": 1},  # jueves pero antes de las 11 -- no es Ordoñez
+                    "11:30": {"capacity": 1},  # jueves 11-14 -- este sí
+                },
+            },
+        }
+        mock_disp.return_value = disponibilidad
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.ofrecer_horarios("+5493584390008")
+        self.assertIsNotNone(resultado)
+        conv = turnos_conversacion.hay_conversacion_activa("+5493584390008")
+        opciones = json.loads(conv["opciones_json"])
+        self.assertEqual(len(opciones), 1)
+        self.assertEqual(opciones[0]["day"], "2026-08-20")
+        self.assertEqual(opciones[0]["time"], "11:30")
 
     @patch("drapp_client.consultar_disponibilidad")
     def test_sin_horarios_disponibles_no_crea_conversacion(self, mock_disp):
@@ -166,7 +197,7 @@ class TestOfrecerHorarios(_BaseTemp):
         opciones = json.loads(conv["opciones_json"])
         dias = [o["day"] for o in opciones]
         self.assertEqual(len(dias), len(set(dias)))  # ningún día repetido
-        self.assertNotIn("10:10", resultado["texto"])  # el 2do horario del mismo día no se ofrece
+        self.assertNotIn("11:10", resultado["texto"])  # el 2do horario del mismo día no se ofrece
 
 
 class TestProcesarEleccion(_BaseTemp):
@@ -226,7 +257,7 @@ class TestProcesarEleccion(_BaseTemp):
         self.assertEqual(resultado["accion"], "turno_creado")
         mock_crear.assert_called_once_with(
             "resources/8c8a2304", "pms_specialties:medicina-general/pms_practices:consulta",
-            "consumers/xyz789", "2026-08-21", "09:00",  # opción de índice 1 -- primer horario del 2do día distinto
+            "consumers/xyz789", "2026-08-21", "10:00",  # opción de índice 1 -- primer horario del 2do día distinto
         )
         conv = self._conv_de(telefono)
         self.assertEqual(conv["estado"], "confirmado")
@@ -398,7 +429,7 @@ class TestProcesarEleccion(_BaseTemp):
         self.assertEqual(resultado["accion"], "turno_creado")
         mock_crear.assert_called_once_with(
             "resources/8c8a2304", "pms_specialties:medicina-general/pms_practices:consulta",
-            "consumers/dni12345678", "2026-08-21", "09:00",  # la opción de índice 1, recordada
+            "consumers/dni12345678", "2026-08-21", "10:00",  # la opción de índice 1, recordada
         )
         conv = self._conv_de(telefono)
         self.assertEqual(conv["estado"], "confirmado")

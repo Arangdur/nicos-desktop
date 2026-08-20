@@ -74,6 +74,28 @@ CONVERSACION_VIGENCIA_HORAS = 4
 # Medicina General por WhatsApp NUNCA debe confirmar un turno en otro lado
 # -- ver _reservar_turno.
 UBICACION_ORDONEZ_ID = "place-46ace5"
+# v0.2.7 (20/08) -- confirmado con Nicolás mirando la configuración real de
+# horarios en DrApp: estas son las franjas de la plantilla "Aneit" -- el
+# consultorio de Ordoñez que SÍ se usa para dar turnos por WhatsApp. Nunca
+# miércoles/sábado/domingo. Aunque DrApp también tiene una plantilla
+# "EL PUENTE" con la misma dirección (Ordoñez, 13-14hs) -- esa franja es
+# para atender por demanda espontánea a trabajadores de la Usina Láctea El
+# Puente, NO para turnos por WhatsApp -- a propósito NO se incluye acá (ni
+# `EL PUENTE` ni su rango horario cuentan como Ordoñez para este filtro).
+# Las franjas de Posse (Psiquiatría, P-SIA) no se pisan con las de Aneit en
+# ningún día -- por eso alcanza con este filtro para no ofrecer nunca por
+# WhatsApp un horario que en realidad va a caer en otro consultorio (o en
+# el de demanda espontánea), sin tener que adivinar franja por franja
+# contra la grilla mezclada de /availability (que no distingue ubicación --
+# ver UBICACION_ORDONEZ_ID más arriba, que sigue como red de seguridad
+# final por si esto cambia y no se actualiza).
+# Claves: día de semana como datetime.date.weekday() (lunes=0).
+FRANJA_ORDONEZ_MEDICINA_GENERAL = {
+    0: ("10:00", "13:00"),  # lunes
+    1: ("10:00", "13:00"),  # martes
+    3: ("11:00", "13:00"),  # jueves
+    4: ("10:00", "13:00"),  # viernes
+}
 
 DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 MESES = [
@@ -101,6 +123,17 @@ def _label_legible(day: str, time: str) -> str:
 
 def _sin_accion(texto: str) -> dict:
     return {"texto": texto, "accion": None}
+
+
+def _en_franja_ordonez(day: str, time: str) -> bool:
+    """True si ese día/horario cae dentro de la franja real de Medicina
+    General en Ordoñez (ver FRANJA_ORDONEZ_MEDICINA_GENERAL) -- comparación
+    de strings alcanza porque HH:MM siempre viene con cero a la izquierda."""
+    franja = FRANJA_ORDONEZ_MEDICINA_GENERAL.get(datetime.date.fromisoformat(day).weekday())
+    if franja is None:
+        return False
+    desde, hasta = franja
+    return desde <= time < hasta
 
 
 def _primer_nombre(paciente):
@@ -219,8 +252,13 @@ def ofrecer_horarios(telefono: str, texto_paciente: str = None):
         # bloqueado, >=1 = libre). Antes se tomaba el primer horario de la
         # lista sin mirar esto, y se llegó a ofrecer -- y crear -- un turno
         # que ya estaba reservado por otro paciente en otro consultorio.
+        # v0.2.7 (20/08) -- además, la grilla mezcla Ordoñez y Posse sin
+        # indicar cuál es cuál -- se filtra también por la franja horaria
+        # real de Ordoñez (ver FRANJA_ORDONEZ_MEDICINA_GENERAL) para no
+        # ofrecer nunca un horario que en realidad es de Posse.
         horas_libres = sorted(
-            h for h, s in slots_por_dia[dia].items() if (s or {}).get("capacity", 0) > 0
+            h for h, s in slots_por_dia[dia].items()
+            if (s or {}).get("capacity", 0) > 0 and _en_franja_ordonez(dia, h)
         )
         if not horas_libres:
             continue
