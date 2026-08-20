@@ -99,7 +99,7 @@ def generar_borrador(mensaje_id: str) -> dict:
         raise MensajeWhatsappError(f"Mensaje no encontrado: {mensaje_id}")
     now = _now_iso()
 
-    respuesta_conversacion = turnos_conversacion.procesar_eleccion(row["telefono"], row["texto_original"])
+    respuesta_conversacion = turnos_conversacion.procesar_eleccion(row["telefono"], row["texto_original"], mensaje_id=mensaje_id)
     if respuesta_conversacion is not None:
         conn.execute(
             "UPDATE mensajes_whatsapp_entrantes SET "
@@ -125,12 +125,12 @@ def generar_borrador(mensaje_id: str) -> dict:
     accion_drapp = None
 
     if data["clasificacion"] == "turno_nuevo":
-        ofrecido = turnos_conversacion.ofrecer_horarios(row["telefono"], row["texto_original"])
+        ofrecido = turnos_conversacion.ofrecer_horarios(row["telefono"], row["texto_original"], mensaje_id=mensaje_id)
         if ofrecido is not None:
             borrador_respuesta = ofrecido["texto"]
             accion_drapp = ofrecido["accion"]
     elif data["clasificacion"] == "cancelacion":
-        cancelado = turnos_conversacion.iniciar_cancelacion(row["telefono"])
+        cancelado = turnos_conversacion.iniciar_cancelacion(row["telefono"], mensaje_id=mensaje_id)
         if cancelado is not None:
             borrador_respuesta = cancelado["texto"]
             accion_drapp = cancelado["accion"]
@@ -264,7 +264,11 @@ def rechazar(mensaje_id: str, resuelto_by: str) -> dict:
     # v0.2.6 -- hallazgo real (21/08): rechazar un mensaje de oferta/turno
     # no cerraba la conversación de Fase C -- el próximo mensaje del mismo
     # teléfono quedaba atrapado tratando de interpretarse como una
-    # elección de horario, aunque no tuviera nada que ver. No-op si no hay
-    # ninguna conversación activa para este teléfono.
-    turnos_conversacion.cerrar_conversacion_activa(mensaje["telefono"])
+    # elección de horario, aunque no tuviera nada que ver.
+    # v0.2.7 (20/08) -- hallazgo real: sin pasar mensaje_id, esto cerraba
+    # CUALQUIER conversación activa del teléfono, no solo la que este
+    # mensaje representaba -- un duplicado rechazado llegó a cerrar una
+    # oferta distinta ya aprobada y enviada. Con mensaje_id, solo cierra si
+    # este mensaje fue el que realmente originó la conversación.
+    turnos_conversacion.cerrar_conversacion_activa(mensaje["telefono"], mensaje_id=mensaje_id)
     return {"ok": True}

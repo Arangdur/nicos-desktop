@@ -162,26 +162,40 @@ def hay_conversacion_activa(telefono: str):
     return conv
 
 
-def cerrar_conversacion_activa(telefono: str):
-    """Cierra cualquier conversación de turno activa para este teléfono --
-    se llama al rechazar un mensaje (ver mensajes_whatsapp.rechazar) para
-    que el próximo mensaje de este paciente arranque de cero en vez de
-    quedar atrapado tratando de interpretarse como una elección de
-    horario que ya no corresponde. No-op si no hay ninguna activa."""
+def cerrar_conversacion_activa(telefono: str, mensaje_id: str = None):
+    """Cierra la conversación de turno activa para este teléfono -- se llama
+    al rechazar un mensaje (ver mensajes_whatsapp.rechazar) para que un
+    paciente cuya OFERTA se rechazó (nunca la llegó a ver) no quede
+    atrapado. No-op si no hay ninguna activa.
+
+    v0.2.7 (20/08) -- hallazgo real: la conversación es por teléfono, no
+    por mensaje -- rechazar un mensaje CUALQUIERA de ese teléfono (ej. un
+    duplicado que la IA no supo interpretar) cerraba de rebote una
+    conversación activa distinta, ya aprobada y enviada, dejando al
+    paciente sin poder responder "1/2/3". Si se pasa `mensaje_id`, solo
+    cierra cuando ese mensaje es efectivamente el que originó la
+    conversación (`mensaje_origen_id`) -- si no coincide, o si la
+    conversación no tiene origen registrado, no toca nada (la expiración
+    automática por tiempo sigue como red de seguridad, ver
+    CONVERSACION_VIGENCIA_HORAS). Sin `mensaje_id` (ningún caller actual lo
+    omite, queda por compatibilidad) cierra sin esa validación."""
     conv = hay_conversacion_activa(telefono)
-    if conv is not None:
-        _marcar_conversacion(conv["id"], "cancelado")
+    if conv is None:
+        return
+    if mensaje_id is not None and conv.get("mensaje_origen_id") != mensaje_id:
+        return
+    _marcar_conversacion(conv["id"], "cancelado")
 
 
-def _crear_conversacion(telefono, tipo, estado, opciones=None, eleccion_index=None):
+def _crear_conversacion(telefono, tipo, estado, opciones=None, eleccion_index=None, mensaje_id=None):
     conn = db.get_connection()
     now = _now_iso()
     conv_id = secrets.token_hex(8)
     conn.execute(
         "INSERT INTO turnos_conversacion "
-        "(id, telefono, tipo, estado, opciones_json, eleccion_index, creado_at, actualizado_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (conv_id, telefono, tipo, estado, json.dumps(opciones) if opciones is not None else None, eleccion_index, now, now),
+        "(id, telefono, tipo, estado, opciones_json, eleccion_index, mensaje_origen_id, creado_at, actualizado_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (conv_id, telefono, tipo, estado, json.dumps(opciones) if opciones is not None else None, eleccion_index, mensaje_id, now, now),
     )
     conn.commit()
     return conv_id
@@ -205,7 +219,7 @@ def _pedir_identificacion(conv_id, eleccion_index=None):
     conn.commit()
 
 
-def ofrecer_horarios(telefono: str, texto_paciente: str = None):
+def ofrecer_horarios(telefono: str, texto_paciente: str = None, mensaje_id: str = None):
     """Consulta disponibilidad real y arma el texto del borrador con hasta
     `CANTIDAD_OPCIONES_A_OFRECER` opciones reales. `accion` siempre None
     acá -- ofrecer horarios nunca ejecuta nada en DrApp por sí solo. None
@@ -275,7 +289,7 @@ def ofrecer_horarios(telefono: str, texto_paciente: str = None):
             "coordinemos. ¡Gracias por tu paciencia! Consultorio Dr. Nicolás Buso."
         )
 
-    _crear_conversacion(telefono, tipo="turno_nuevo", estado="esperando_eleccion", opciones=opciones)
+    _crear_conversacion(telefono, tipo="turno_nuevo", estado="esperando_eleccion", opciones=opciones, mensaje_id=mensaje_id)
 
     lista = "\n".join(f"{i + 1}) {o['label']}" for i, o in enumerate(opciones))
     return _sin_accion(
@@ -285,7 +299,7 @@ def ofrecer_horarios(telefono: str, texto_paciente: str = None):
     )
 
 
-def procesar_eleccion(telefono: str, texto: str):
+def procesar_eleccion(telefono: str, texto: str, mensaje_id: str = None):
     """Punto de entrada único para cualquier respuesta dentro de una
     conversación activa (elegir un horario, o dar DNI/nombre cuando se
     pidió identificación) -- despacha según el estado real de la
@@ -298,10 +312,10 @@ def procesar_eleccion(telefono: str, texto: str):
     if conv["estado"] == "esperando_identificacion":
         return _procesar_identificacion(conv, texto)
 
-    return _procesar_eleccion_horario(conv, telefono, texto)
+    return _procesar_eleccion_horario(conv, telefono, texto, mensaje_id=mensaje_id)
 
 
-def _procesar_eleccion_horario(conv, telefono, texto):
+def _procesar_eleccion_horario(conv, telefono, texto, mensaje_id=None):
     cfg = _config()
     if cfg is None:
         # No debería pasar (si se pudo ofrecer, DrApp estaba configurado),
@@ -320,7 +334,7 @@ def _procesar_eleccion_horario(conv, telefono, texto):
         resultado_fecha = ai_router.interpretar_preferencia_fecha(texto)
         if resultado_fecha["outcome"] == "success" and resultado_fecha["data"]["dias_desde_hoy"] is not None:
             _marcar_conversacion(conv["id"], "expirado")
-            nueva_oferta = ofrecer_horarios(telefono, texto)
+            nueva_oferta = ofrecer_horarios(telefono, texto, mensaje_id=mensaje_id)
             if nueva_oferta is not None:
                 return nueva_oferta
         # v0.2.6 (20/08) -- pedido real de Nicolás: si ni es una elección ni
@@ -434,7 +448,7 @@ def _procesar_identificacion(conv, texto):
     return _reservar_turno(conv["id"], resource_id, service_key, paciente, elegido)
 
 
-def iniciar_cancelacion(telefono: str):
+def iniciar_cancelacion(telefono: str, mensaje_id: str = None):
     """Busca el turno de Medicina General más próximo del paciente. Con
     24hs o más de anticipación, CANCELA automáticamente y devuelve
     `accion: "turno_cancelado"`. Con menos de 24hs, o si hay cualquier
@@ -452,7 +466,7 @@ def iniciar_cancelacion(telefono: str):
         return _sin_accion("Tuvimos un problema para buscar tu turno -- ya avisamos al consultorio para que se comunique con vos.")
 
     if paciente is None:
-        _crear_conversacion(telefono, tipo="cancelacion", estado="esperando_identificacion")
+        _crear_conversacion(telefono, tipo="cancelacion", estado="esperando_identificacion", mensaje_id=mensaje_id)
         return _sin_accion(
             "No te encuentro en el sistema con este número, pero no hay problema -- pasame tu DNI o "
             "tu nombre y apellido completo y buscamos tu turno para cancelarlo."

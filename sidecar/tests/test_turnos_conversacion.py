@@ -201,10 +201,10 @@ class TestOfrecerHorarios(_BaseTemp):
 
 
 class TestProcesarEleccion(_BaseTemp):
-    def _ofrecer(self, telefono="+5493584390010"):
+    def _ofrecer(self, telefono="+5493584390010", mensaje_id=None):
         with patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE):
             with patch.dict(os.environ, DRAPP_ENV):
-                turnos_conversacion.ofrecer_horarios(telefono)
+                turnos_conversacion.ofrecer_horarios(telefono, mensaje_id=mensaje_id)
         return telefono
 
     def test_sin_conversacion_activa_devuelve_none(self):
@@ -223,6 +223,22 @@ class TestProcesarEleccion(_BaseTemp):
 
     def test_cerrar_conversacion_activa_es_no_op_sin_conversacion(self):
         turnos_conversacion.cerrar_conversacion_activa("+5493584390012")  # no debe romper
+
+    def test_rechazar_mensaje_ajeno_no_cierra_la_conversacion_real(self):
+        # v0.2.7 (20/08) -- hallazgo real: un paciente ya tenía una oferta
+        # aprobada y enviada (conversación activa, originada por
+        # "mensaje-real"). Un mensaje DUPLICADO posterior ("mensaje-otro",
+        # mismo teléfono) generó su propio borrador dentro de esa misma
+        # conversación -- pero rechazar ESE mensaje no debe cerrar la
+        # conversación real, porque el paciente todavía puede responder
+        # "1/2/3" a la oferta que sí recibió.
+        telefono = self._ofrecer("+5493584390014", mensaje_id="mensaje-real")
+        turnos_conversacion.cerrar_conversacion_activa(telefono, mensaje_id="mensaje-otro")
+        self.assertIsNotNone(turnos_conversacion.hay_conversacion_activa(telefono))
+
+        # Rechazar el mensaje que SÍ originó la conversación, en cambio, la cierra.
+        turnos_conversacion.cerrar_conversacion_activa(telefono, mensaje_id="mensaje-real")
+        self.assertIsNone(turnos_conversacion.hay_conversacion_activa(telefono))
 
     def test_conversacion_vieja_expira_sola(self):
         telefono = self._ofrecer("+5493584390013")
