@@ -25,6 +25,17 @@ function _maybeInitAutoUpdater(role) {
 
 function _envFromConfig(config) {
   const env = {};
+  // v0.2.7 (21/08) -- hallazgo real empaquetando el primer .dmg real para
+  // Nicolás: sin esto, el sidecar (PyInstaller onefile) guarda nicos.db al
+  // lado de su propio __file__, que en modo empaquetado resuelve a la
+  // carpeta de extracción TEMPORAL de PyInstaller -- se borra al cerrar la
+  // app, así que todos los datos (WhatsApp, turnos, facturas) se perderían
+  // en cada reinicio, no solo en cada actualización. En desarrollo
+  // (npm start, app.isPackaged=false) esto no se toca -- sigue usando
+  // sidecar/nicos.db de siempre, mismo comportamiento que toda la sesión.
+  if (app.isPackaged) {
+    env.NICOS_DB_PATH = path.join(app.getPath('userData'), 'nicos.db');
+  }
   if (config.ANTHROPIC_API_KEY) env.ANTHROPIC_API_KEY = config.ANTHROPIC_API_KEY;
   if (config.OPENAI_API_KEY) env.OPENAI_API_KEY = config.OPENAI_API_KEY;
   if (config.ANTHROPIC_MODEL) env.ANTHROPIC_MODEL = config.ANTHROPIC_MODEL;
