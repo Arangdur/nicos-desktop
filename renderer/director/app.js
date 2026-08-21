@@ -207,6 +207,121 @@ function _wireAtencionClicks() {
   });
 }
 
+// v0.2.7 (20/08) -- pedido real de Nicolás: panel de salud de Fase C.
+// Antes, ver el estado de una conversación de turno (activa, o trabada en
+// 'derivado'/'expirado') significaba una query manual a SQLite -- esto lo
+// pone en el Resumen. Solo Director (la ruta es Director-only, ver
+// server.py -- es información técnica, no algo para que Marianela resuelva).
+const ESPECIALIDAD_LABEL_RESUMEN = { medicina_general: 'Medicina General', psiquiatria: 'Psiquiatría' };
+const ESTADO_CONVERSACION_LABEL = {
+  esperando_especialidad: 'Preguntando especialidad',
+  esperando_eleccion: 'Esperando que elija horario',
+  esperando_identificacion: 'Pidiendo DNI/nombre',
+  confirmado: 'Turno confirmado',
+  cancelado: 'Cancelado',
+  expirado: 'Expirado sin resolver',
+  derivado: 'Derivado a una persona',
+};
+
+function _renderFaseCHtml(conversaciones) {
+  const activas = conversaciones.filter((c) => ['esperando_especialidad', 'esperando_eleccion', 'esperando_identificacion'].includes(c.estado));
+  const necesitanRevision = conversaciones.filter((c) => c.estado === 'derivado' || c.estado === 'expirado');
+
+  const fila = (c) => `
+    <tr>
+      <td>${escHtml(c.telefono)}</td>
+      <td>${escHtml(ESPECIALIDAD_LABEL_RESUMEN[c.especialidad] || '—')}</td>
+      <td>${escHtml(ESTADO_CONVERSACION_LABEL[c.estado] || c.estado)}</td>
+      <td>${tiempoRelativo(c.actualizado_at) || '—'}</td>
+    </tr>
+  `;
+
+  return `
+    <div class="card" id="card-fase-c">
+      <h3>Turnos por WhatsApp (Fase C)</h3>
+      ${activas.length === 0 ? '<div class="empty">Ninguna conversación activa ahora.</div>' : `
+        <table>
+          <tr><th>Teléfono</th><th>Especialidad</th><th>Estado</th><th>Hace</th></tr>
+          ${activas.map(fila).join('')}
+        </table>
+      `}
+      ${necesitanRevision.length > 0 ? `
+        <h4 style="margin-top:var(--space-4); text-transform:uppercase; font-size:12px; color:var(--muted); letter-spacing:0.03em;">
+          Derivadas o expiradas en las últimas 24hs (${necesitanRevision.length})
+        </h4>
+        <table>
+          <tr><th>Teléfono</th><th>Especialidad</th><th>Estado</th><th>Hace</th></tr>
+          ${necesitanRevision.map(fila).join('')}
+        </table>
+      ` : ''}
+    </div>
+  `;
+}
+
+async function _refrescarFaseC() {
+  const el = document.getElementById('card-fase-c');
+  if (!el) return; // el Resumen ya no está montado
+  const data = await fetchJson('/api/v1/turnos/conversaciones?horas=24').catch(() => null);
+  if (!data || !data.ok) return; // no bloquea el resto del Resumen si esto falla
+  el.outerHTML = _renderFaseCHtml(data.conversaciones);
+}
+
+// v0.2.7 (20/08) -- pedido real de Nicolás: "lo que salió solo hoy" -- los
+// tres casos que se auto-envían sin aprobación (saludo puro, acuse de
+// receta, seguimiento de receta) quedan marcados uno por uno en la Bandeja,
+// pero no había ningún resumen para un chequeo rápido a la mañana.
+function _tipoAutoEnvio(m) {
+  if (m.clasificacion === 'receta') return 'Receta';
+  return 'Saludo';
+}
+
+function _renderAutoEnviadosHtml(mensajesHoy) {
+  if (mensajesHoy.length === 0) {
+    return `
+      <div class="card" id="card-auto-enviados">
+        <h3>Lo que salió solo hoy</h3>
+        <div class="empty">Nada se mandó automático todavía hoy.</div>
+      </div>
+    `;
+  }
+  const recetas = mensajesHoy.filter((m) => m.clasificacion === 'receta').length;
+  const saludos = mensajesHoy.length - recetas;
+  const MOSTRAR = 8;
+  return `
+    <div class="card" id="card-auto-enviados">
+      <h3>Lo que salió solo hoy</h3>
+      <div class="metric-grid">
+        <div class="metric"><div class="metric-label">Total</div><div class="metric-value">${mensajesHoy.length}</div></div>
+        <div class="metric"><div class="metric-label">Saludos</div><div class="metric-value">${saludos}</div></div>
+        <div class="metric"><div class="metric-label">Recetas</div><div class="metric-value">${recetas}</div></div>
+      </div>
+      <table style="margin-top:var(--space-3);">
+        <tr><th>Hora</th><th>Teléfono</th><th>Tipo</th></tr>
+        ${mensajesHoy.slice(0, MOSTRAR).map((m) => `
+          <tr>
+            <td>${new Date(m.resuelto_at + 'Z').toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}</td>
+            <td>${escHtml(m.telefono)}</td>
+            <td>${_tipoAutoEnvio(m)}</td>
+          </tr>
+        `).join('')}
+      </table>
+      ${mensajesHoy.length > MOSTRAR ? `<p class="help-text">+ ${mensajesHoy.length - MOSTRAR} más -- ver Bandeja de WhatsApp.</p>` : ''}
+    </div>
+  `;
+}
+
+async function _refrescarAutoEnviados() {
+  const el = document.getElementById('card-auto-enviados');
+  if (!el) return;
+  const data = await fetchJson('/api/v1/whatsapp/mensajes').catch(() => null);
+  if (!data || !data.ok) return;
+  const hoyISO = new Date().toISOString().slice(0, 10);
+  const mensajesHoy = data.mensajes
+    .filter((m) => m.resuelto_by === 'sistema' && (m.resuelto_at || '').slice(0, 10) === hoyISO)
+    .sort((a, b) => (a.resuelto_at < b.resuelto_at ? 1 : -1));
+  el.outerHTML = _renderAutoEnviadosHtml(mensajesHoy);
+}
+
 // v0.2.5 -- gráfico de barras Ingresos/Gastos/Saldo, mismo concepto que ya
 // usa jarvis-trabajo/dashboard.html (cfo-balance-chart) pero con Chart.js
 // vendorizado acá mismo (renderer/shared/vendor/chart.umd.min.js) en vez de
@@ -266,6 +381,8 @@ async function loadResumen() {
 
   el.innerHTML = `
     ${_renderAtencionHtml({ tareas: 0, whatsapp: 0, turnos: 0 })}
+    ${_renderFaseCHtml([])}
+    ${_renderAutoEnviadosHtml([])}
 
     <div class="card">
       <h3>CFO Financiero</h3>
@@ -340,7 +457,7 @@ async function loadResumen() {
   `;
 
   _dibujarGraficoCfo(cfo);
-  await _refrescarAtencion();
+  await Promise.all([_refrescarAtencion(), _refrescarFaseC(), _refrescarAutoEnviados()]);
 }
 
 function renderChatLog() {
@@ -481,10 +598,13 @@ async function init() {
         if (badge && d.ok) badge.textContent = d.tasks.length > 0 ? `(${d.tasks.length})` : '';
       });
     }
-    // Mismo cadencia para "Necesita tu atención" del Resumen -- solo si esa
-    // pestaña está montada (_refrescarAtencion no hace nada si no lo está).
+    // Mismo cadencia para "Necesita tu atención" y los paneles nuevos de
+    // Fase C del Resumen -- solo si esa pestaña está montada (cada
+    // _refrescar* no hace nada si no lo está).
     if (document.getElementById('tab-resumen').style.display !== 'none') {
       _refrescarAtencion();
+      _refrescarFaseC();
+      _refrescarAutoEnviados();
     }
 
     // v0.2.6 -- pedido real de Nicolás mientras probaba Fase C: había que

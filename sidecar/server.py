@@ -44,6 +44,7 @@ import mensajes_whatsapp
 import pairing
 import recordatorios
 import tasks
+import turnos_conversacion
 import twilio_client
 import whatsapp_inbound
 import worker
@@ -324,6 +325,21 @@ class Handler(BaseHTTPRequestHandler):
                     qs = parse_qs(parsed.query)
                 estado = qs.get("estado", [None])[0]
                 self._send_json(200, {"ok": True, "mensajes": mensajes_whatsapp.list_mensajes(estado)})
+            elif path == "/api/v1/turnos/conversaciones":
+                # v0.2.7 (20/08) -- panel de salud de Fase C en el Resumen
+                # del Director. Director-only -- es información técnica de
+                # depuración (estado interno de la conversación), no algo
+                # que Marianela necesite ver o resolver -- ella ya ve el
+                # mensaje real del paciente en la Bandeja de WhatsApp.
+                auth = self._require_role(self._authenticate(), {"director"})
+                if auth is None:
+                    return
+                qs = {}
+                if parsed.query:
+                    from urllib.parse import parse_qs
+                    qs = parse_qs(parsed.query)
+                horas = int(qs.get("horas", ["24"])[0])
+                self._send_json(200, {"ok": True, "conversaciones": turnos_conversacion.list_conversaciones_recientes(horas)})
             elif path == "/api/v1/facturas":
                 # Ver la bandeja es Director + Operativa (igual que mensajes) --
                 # pero aprobar/rechazar (más abajo, en do_POST) es Director-only

@@ -698,3 +698,24 @@ def _cancelar_para_paciente(conv_id, paciente):
         "texto": f"{saludo} Cancelamos tu turno del {label}. Si querés reprogramar, escribinos cuando quieras -- va a ser un gusto ayudarte. Consultorio Dr. Nicolás Buso.",
         "accion": "turno_cancelado",
     }
+
+
+def list_conversaciones_recientes(horas: int = 24) -> list:
+    """v0.2.7 (20/08) -- pedido real de Nicolás: panel de salud de Fase C en
+    el Resumen del Director. Antes, la única forma de ver el estado de una
+    conversación de turno era una query manual a SQLite -- esto expone lo
+    mismo por API para armar un panel: conversaciones activas ahora
+    mismo, y las que quedaron 'derivado'/'expirado' en las últimas
+    `horas` (necesitan revisión humana, o son solo ruido esperable --
+    quien mira el panel decide). Trae todo lo creado O actualizado en la
+    ventana, para no perder una conversación vieja que recién ahora
+    quedó derivada."""
+    conn = db.get_connection()
+    limite = (datetime.datetime.utcnow() - datetime.timedelta(hours=horas)).isoformat()
+    rows = conn.execute(
+        "SELECT id, telefono, tipo, estado, especialidad, creado_at, actualizado_at "
+        "FROM turnos_conversacion WHERE creado_at >= ? OR actualizado_at >= ? "
+        "ORDER BY actualizado_at DESC",
+        (limite, limite),
+    ).fetchall()
+    return [dict(r) for r in rows]

@@ -852,5 +852,34 @@ class TestIntegracionMensajesWhatsapp(_BaseTemp):
         self.assertEqual(mensaje["borrador_respuesta"], "alguien va a confirmar el horario")
 
 
+class TestListConversacionesRecientes(_BaseTemp):
+    # v0.2.7 (20/08) -- panel de salud de Fase C en el Resumen del Director.
+    def test_trae_conversaciones_dentro_de_la_ventana(self):
+        with patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE):
+            with patch.dict(os.environ, DRAPP_ENV):
+                turnos_conversacion._ofrecer_horarios_especialidad("medicina_general", "+5493584390060")
+
+        conversaciones = turnos_conversacion.list_conversaciones_recientes(horas=24)
+        self.assertEqual(len(conversaciones), 1)
+        self.assertEqual(conversaciones[0]["telefono"], "+5493584390060")
+        self.assertEqual(conversaciones[0]["estado"], "esperando_eleccion")
+        self.assertEqual(conversaciones[0]["especialidad"], "medicina_general")
+
+    def test_conversacion_vieja_fuera_de_la_ventana_no_aparece(self):
+        with patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE):
+            with patch.dict(os.environ, DRAPP_ENV):
+                turnos_conversacion._ofrecer_horarios_especialidad("medicina_general", "+5493584390061")
+
+        conn = db.get_connection()
+        hace_2_dias = (datetime.datetime.utcnow() - datetime.timedelta(days=2)).isoformat()
+        conn.execute(
+            "UPDATE turnos_conversacion SET creado_at = ?, actualizado_at = ? WHERE telefono = ?",
+            (hace_2_dias, hace_2_dias, "+5493584390061"),
+        )
+        conn.commit()
+
+        self.assertEqual(turnos_conversacion.list_conversaciones_recientes(horas=24), [])
+
+
 if __name__ == "__main__":
     unittest.main()
