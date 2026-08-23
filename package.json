@@ -21,6 +21,7 @@
     "appId": "com.nicolasbuso.nicos-desktop",
     "productName": "NicOS Desktop",
     "artifactName": "NicOS-Desktop-${version}-${arch}.${ext}",
+    "afterSign": "scripts/afterSign-mac.js",
     "files": [
       "electron/**/*",
       "renderer/**/*",
