@@ -45,13 +45,40 @@ function startSidecar(envOverrides) {
     });
 
     let resolved = false;
+    // v0.2.7 (23/08) -- hallazgo real: la app empaquetada mostraba "sidecar
+    // no disponible" en el primer arranque, aunque el sidecar SÍ estaba
+    // sano (confirmado pegándole directo al puerto real mientras la UI
+    // decía lo contrario). Dos causas reales, las dos corregidas acá:
+    // (1) el regex solo miraba el ÚLTIMO chunk de stdout -- si Node parte
+    // "NICOS_SIDECAR_PORT=NNNN" justo en el medio entre dos eventos 'data'
+    // (Node no garantiza que un chunk sea una línea completa), nunca
+    // matcheaba ninguno de los dos. Ahora se acumula todo el stdout visto
+    // y se busca ahí. (2) 10s podía quedar justo en un primer arranque
+    // empaquetado (migraciones + backup + verificación de la firma nueva)
+    // -- se sube a 20s de margen.
+    let stdoutBuffer = '';
     const timeout = setTimeout(() => {
-      if (!resolved) reject(new Error('El sidecar no arrancó a tiempo (10s).'));
-    }, 10000);
+      if (resolved) return;
+      // v0.2.7 (23/08) -- hallazgo real, causa de fondo: sin esto,
+      // `readyPromise` quedaba cacheado como RECHAZADO para siempre --
+      // ningún reintento ("Intentar nuevamente" en la UI) volvía a probar
+      // de verdad, aunque el proceso del sidecar siguiera vivo y sano (se
+      // confirmó pegándole directo al puerto real mientras la UI seguía
+      // diciendo "no disponible"). Se mata el proceso que no llegó a
+      // avisar su puerto a tiempo (para no dejarlo huérfano ocupando el
+      // puerto) y se limpia el estado -- así el próximo llamado arranca
+      // uno nuevo de verdad en vez de reusar esta promesa ya perdida.
+      const proc = sidecarProcess;
+      sidecarProcess = null;
+      readyPromise = null;
+      if (proc) proc.kill();
+      reject(new Error('El sidecar no arrancó a tiempo (20s).'));
+    }, 20000);
 
     sidecarProcess.stdout.on('data', (chunk) => {
       const text = chunk.toString();
-      const match = text.match(/NICOS_SIDECAR_PORT=(\d+)/);
+      stdoutBuffer += text;
+      const match = stdoutBuffer.match(/NICOS_SIDECAR_PORT=(\d+)/);
       if (match && !resolved) {
         sidecarPort = parseInt(match[1], 10);
         resolved = true;

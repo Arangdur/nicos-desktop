@@ -79,10 +79,24 @@ async function _bootAndLoad() {
   // a la Mac (ver operativa-client.js), así que no hay ningún secreto que pueda
   // terminar en la PC de Marianela ni siquiera por error de configuración.
   if (role === 'director') {
-    try {
-      port = await sidecar.startSidecar(_envFromConfig(config));
-    } catch (err) {
-      console.error('[main] no se pudo arrancar el sidecar:', err);
+    // v0.2.7 (23/08) -- hallazgo real: en la Mac de Nicolás el primer
+    // arranque del sidecar empaquetado tardaba más de lo esperado (o se
+    // perdía el aviso del puerto) lanzado desde Finder/Electron -- andaba
+    // bien corriendo el mismo binario a mano desde la Terminal, así que no
+    // es que el sidecar esté roto, es que ese primer intento puede fallar
+    // por un motivo transitorio (el diálogo del llavero interrumpiendo,
+    // disco ocupado, etc.). En vez de rendirse a la primera, reintenta un
+    // par de veces antes de mostrar "sidecar no disponible" -- cada intento
+    // ya arranca limpio porque startSidecar() ahora limpia su propio estado
+    // si el anterior se pasó de tiempo (ver sidecar-manager.js).
+    const INTENTOS = 3;
+    for (let intento = 1; intento <= INTENTOS; intento++) {
+      try {
+        port = await sidecar.startSidecar(_envFromConfig(config));
+        break;
+      } catch (err) {
+        console.error(`[main] intento ${intento}/${INTENTOS} de arrancar el sidecar falló:`, err);
+      }
     }
   } else if (role === 'operativa') {
     _startOutboxFlusher();
