@@ -340,6 +340,15 @@ class Handler(BaseHTTPRequestHandler):
                     qs = parse_qs(parsed.query)
                 horas = int(qs.get("horas", ["24"])[0])
                 self._send_json(200, {"ok": True, "conversaciones": turnos_conversacion.list_conversaciones_recientes(horas)})
+            elif path == "/api/v1/worker/estado":
+                # v0.2.8 (24/08) -- "pulso del worker" en el Resumen del
+                # Director -- Director-only, mismo criterio que
+                # /api/v1/turnos/conversaciones (información técnica de
+                # depuración, no algo que Marianela necesite ver).
+                auth = self._require_role(self._authenticate(), {"director"})
+                if auth is None:
+                    return
+                self._send_json(200, {"ok": True, "estado": worker.estado_worker()})
             elif path == "/api/v1/facturas":
                 # Ver la bandeja es Director + Operativa (igual que mensajes) --
                 # pero aprobar/rechazar (más abajo, en do_POST) es Director-only

@@ -322,6 +322,40 @@ async function _refrescarAutoEnviados() {
   el.outerHTML = _renderAutoEnviadosHtml(mensajesHoy);
 }
 
+// v0.2.8 (24/08) -- pedido real de Nicolás: "pulso del worker" -- saber sin
+// abrir logs si el loop de fondo (sidecar/worker.py) sigue vivo. Mismo
+// patrón que _renderFaseCHtml/_refrescarFaseC. Sin `ultimo_tick_ok` reciente
+// el worker probablemente murió silenciosamente.
+function _renderWorkerHtml(estado) {
+  const tick = tiempoRelativo(estado.ultimo_tick_ok);
+  const vivo = !!tick; // si nunca tuvo una vuelta ok, no hay forma de saber si está vivo
+  return `
+    <div class="card" id="card-worker">
+      <div class="row-between"><h3 style="margin:0;">Worker de fondo</h3>${estado.iniciado_en ? freshTagGlobal(estado.iniciado_en, 'arrancó') : ''}</div>
+      <dl class="kv-grid">
+        <dt>Última vuelta OK</dt><dd style="color:${vivo ? 'var(--green)' : 'var(--red)'};">${tick || 'nunca'}</dd>
+        <dt>Errores atajados (24hs)</dt><dd>${fmtNum(estado.errores_atajados_24hs)}</dd>
+      </dl>
+      ${estado.ultimo_error ? `
+        <p class="help-text">Último error (${tiempoRelativo(estado.ultimo_error.at) || '—'}): ${escHtml(estado.ultimo_error.error.slice(0, 200))}</p>
+      ` : ''}
+    </div>
+  `;
+}
+
+function freshTagGlobal(fecha, prefijo) {
+  const t = tiempoRelativo(fecha);
+  return t ? `<span style="font-size:12px; font-weight:500; color:var(--muted); text-transform:none;">${prefijo} ${t}</span>` : '';
+}
+
+async function _refrescarWorker() {
+  const el = document.getElementById('card-worker');
+  if (!el) return;
+  const data = await fetchJson('/api/v1/worker/estado').catch(() => null);
+  if (!data || !data.ok) return;
+  el.outerHTML = _renderWorkerHtml(data.estado);
+}
+
 // v0.2.5 -- gráfico de barras Ingresos/Gastos/Saldo, mismo concepto que ya
 // usa jarvis-trabajo/dashboard.html (cfo-balance-chart) pero con Chart.js
 // vendorizado acá mismo (renderer/shared/vendor/chart.umd.min.js) en vez de
@@ -383,6 +417,7 @@ async function loadResumen() {
     ${_renderAtencionHtml({ tareas: 0, whatsapp: 0, turnos: 0 })}
     ${_renderFaseCHtml([])}
     ${_renderAutoEnviadosHtml([])}
+    ${_renderWorkerHtml({})}
 
     <div class="card">
       <h3>CFO Financiero</h3>
@@ -457,7 +492,7 @@ async function loadResumen() {
   `;
 
   _dibujarGraficoCfo(cfo);
-  await Promise.all([_refrescarAtencion(), _refrescarFaseC(), _refrescarAutoEnviados()]);
+  await Promise.all([_refrescarAtencion(), _refrescarFaseC(), _refrescarAutoEnviados(), _refrescarWorker()]);
 }
 
 function renderChatLog() {
@@ -605,6 +640,7 @@ async function init() {
       _refrescarAtencion();
       _refrescarFaseC();
       _refrescarAutoEnviados();
+      _refrescarWorker();
     }
 
     // v0.2.6 -- pedido real de Nicolás mientras probaba Fase C: había que

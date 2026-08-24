@@ -76,6 +76,18 @@ _ultimo_sync_mail = None
 MAIL_CHECK_INTERVAL_SECONDS = 60
 _ultimo_chequeo_mail = None
 
+# v0.2.8 (24/08) -- pedido real de Nicolás: "pulso del worker" en el
+# Resumen del Director -- antes, la única forma de saber si el loop de
+# fondo seguía vivo y sano era mirar el log de texto plano a mano (así se
+# encontraron varios bugs reales esta misma sesión). Solo en memoria --
+# no sobrevive un reinicio de la app, pero para "¿está vivo AHORA?" no
+# hace falta que sobreviva. Acotado a los últimos ERRORES_ATAJADOS_MAX
+# para no crecer sin límite en un proceso que corre días.
+ERRORES_ATAJADOS_MAX = 20
+_worker_iniciado_en = None
+_ultimo_tick_ok = None
+_errores_atajados = []  # [{"at": iso, "error": str}, ...] -- más nuevo al final
+
 # v0.2.1-rc6: respaldo estructural ADEMÁS del arreglo de la máquina de estados
 # (ver tasks.py) -- ninguna tarea puede pasar por _process_classification()
 # más de esta cantidad de veces, pase lo que pase. Es la segunda red de
@@ -607,7 +619,9 @@ def _procesar_facturas_si_corresponde():
 
 
 def run_forever():
+    global _worker_iniciado_en, _ultimo_tick_ok
     recover_orphaned_tasks()
+    _worker_iniciado_en = datetime.datetime.utcnow().isoformat()
     sys.stderr.write("[worker] loop arrancado\n")
     while True:
         # v0.2.6 -- hallazgo real: un IntegrityError sin atrapar en
@@ -628,6 +642,7 @@ def run_forever():
             _procesar_facturas_si_corresponde()
             _sincronizar_mail_si_corresponde()
             _procesar_mail_si_corresponde()
+            _ultimo_tick_ok = datetime.datetime.utcnow().isoformat()
             task = _claim_next_task()
             if task is None:
                 time.sleep(POLL_INTERVAL_SECONDS)
@@ -637,5 +652,23 @@ def run_forever():
             elif task["state"] == "ready":
                 _process_execution(task)
         except Exception:
-            sys.stderr.write("[worker] ERROR no esperado en el loop -- se sigue en el próximo tick:\n" + traceback.format_exc() + "\n")
+            error_texto = traceback.format_exc()
+            sys.stderr.write("[worker] ERROR no esperado en el loop -- se sigue en el próximo tick:\n" + error_texto + "\n")
+            _errores_atajados.append({"at": datetime.datetime.utcnow().isoformat(), "error": error_texto[-800:]})
+            del _errores_atajados[:-ERRORES_ATAJADOS_MAX]
             time.sleep(POLL_INTERVAL_SECONDS)
+
+
+def estado_worker() -> dict:
+    """v0.2.8 (24/08) -- pedido real de Nicolás: "pulso del worker" en el
+    Resumen del Director. `ultimo_tick_ok` es lo que importa para saber si
+    el loop sigue vivo -- se actualiza al final de cada vuelta exitosa de
+    las revisiones periódicas, antes de tocar ninguna tarea puntual."""
+    limite = (datetime.datetime.utcnow() - datetime.timedelta(hours=24)).isoformat()
+    errores_recientes = [e for e in _errores_atajados if e["at"] >= limite]
+    return {
+        "iniciado_en": _worker_iniciado_en,
+        "ultimo_tick_ok": _ultimo_tick_ok,
+        "errores_atajados_24hs": len(errores_recientes),
+        "ultimo_error": _errores_atajados[-1] if _errores_atajados else None,
+    }
