@@ -249,15 +249,15 @@ def cerrar_conversacion_activa(telefono: str, mensaje_id: str = None):
     _marcar_conversacion(conv["id"], "cancelado")
 
 
-def _crear_conversacion(telefono, tipo, estado, opciones=None, eleccion_index=None, mensaje_id=None, especialidad=None):
+def _crear_conversacion(telefono, tipo, estado, opciones=None, eleccion_index=None, mensaje_id=None, especialidad=None, drapp_event_id=None, consumer_id=None):
     conn = db.get_connection()
     now = _now_iso()
     conv_id = secrets.token_hex(8)
     conn.execute(
         "INSERT INTO turnos_conversacion "
-        "(id, telefono, tipo, estado, especialidad, opciones_json, eleccion_index, mensaje_origen_id, creado_at, actualizado_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (conv_id, telefono, tipo, estado, especialidad, json.dumps(opciones) if opciones is not None else None, eleccion_index, mensaje_id, now, now),
+        "(id, telefono, tipo, estado, especialidad, opciones_json, eleccion_index, drapp_event_id, consumer_id, mensaje_origen_id, creado_at, actualizado_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (conv_id, telefono, tipo, estado, especialidad, json.dumps(opciones) if opciones is not None else None, eleccion_index, drapp_event_id, consumer_id, mensaje_id, now, now),
     )
     conn.commit()
     return conv_id
@@ -317,7 +317,11 @@ def _texto_derivar_otras_especialidades() -> str:
     )
 
 
-def _ofrecer_horarios_especialidad(especialidad: str, telefono: str, texto_paciente: str = None, mensaje_id: str = None):
+def _ofrecer_horarios_especialidad(
+    especialidad: str, telefono: str, texto_paciente: str = None, mensaje_id: str = None,
+    tipo: str = "turno_nuevo", drapp_event_id: str = None, turno_actual_label: str = None,
+    consumer_id: str = None,
+):
     """Consulta disponibilidad real y arma el texto del borrador con hasta
     `CANTIDAD_OPCIONES_A_OFRECER` opciones reales, ya para una especialidad
     concreta (`ESPECIALIDADES`). `accion` siempre None acá -- ofrecer
@@ -333,7 +337,19 @@ def _ofrecer_horarios_especialidad(especialidad: str, telefono: str, texto_pacie
     calcula una fecha ella misma, solo un número de días que se suma acá a
     datetime.now() real. (2) si no dijo nada, se ofrece UN horario por
     día distinto (no todos seguidos del mismo día) -- da variedad de
-    fechas sin tener que preguntar."""
+    fechas sin tener que preguntar.
+
+    v0.2.8 (24/08) -- reusada también para reprogramación (`tipo`,
+    `drapp_event_id` del turno VIEJO a mover, `turno_actual_label` para
+    avisarle al paciente cuál está reemplazando) -- la mecánica de
+    consultar/filtrar/armar opciones es idéntica, solo cambia qué tipo de
+    conversación se abre y el texto del mensaje. `consumer_id`: si quien
+    llama YA identificó al paciente (ej. reprogramación que necesitó DNI
+    para encontrar el turno viejo), se guarda acá para que
+    `_procesar_eleccion_horario` no vuelva a intentar `buscar_paciente_
+    por_telefono` al confirmar -- ese teléfono nunca va a matchear (por
+    eso hizo falta pedir DNI en primer lugar), y sin esto quedaba pidiendo
+    identificación en loop."""
     cfg = _config(especialidad)
     if cfg is None:
         return None
@@ -390,17 +406,21 @@ def _ofrecer_horarios_especialidad(especialidad: str, telefono: str, texto_pacie
         )
 
     _crear_conversacion(
-        telefono, tipo="turno_nuevo", estado="esperando_eleccion", opciones=opciones,
-        mensaje_id=mensaje_id, especialidad=especialidad,
+        telefono, tipo=tipo, estado="esperando_eleccion", opciones=opciones,
+        mensaje_id=mensaje_id, especialidad=especialidad, drapp_event_id=drapp_event_id,
+        consumer_id=consumer_id,
     )
 
     # v0.2.7 (20/08) -- pedido real de Nicolás: los mensajes de Psiquiatría
     # llevan un tono más cálido que un turno de rutina.
     saludo = "¡Hola! 🤍 Quiero ayudarte a encontrar un buen horario." if especialidad == "psiquiatria" else "¡Hola! 👋"
     lista = "\n".join(f"{i + 1}) {o['label']}" for i, o in enumerate(opciones))
+    if tipo == "reprogramacion":
+        intro = f"{saludo} Para reprogramar tu turno del {turno_actual_label}, estos son los horarios nuevos disponibles para {nombre_especialidad}:"
+    else:
+        intro = f"{saludo} Estos son los horarios que tenemos disponibles para tu consulta de {nombre_especialidad}:"
     return _sin_accion(
-        f"{saludo} Estos son los horarios que tenemos disponibles para tu consulta de "
-        f"{nombre_especialidad}:\n{lista}\n\nRespondé con el número del que te quede mejor, o "
+        f"{intro}\n{lista}\n\nRespondé con el número del que te quede mejor, o "
         "contame si preferís otra fecha y te busco otras opciones. Consultorio Dr. Nicolás Buso."
     )
 
@@ -498,10 +518,19 @@ def _procesar_eleccion_horario(conv, telefono, texto, mensaje_id=None):
     eleccion_index = resultado["data"]["eleccion"]
     elegido = opciones[eleccion_index]
 
-    try:
-        paciente = drapp_client.buscar_paciente_por_telefono(telefono)
-    except drapp_client.DrAppAPIError:
-        return _sin_accion("Tuvimos un problema para confirmar tu turno -- ya avisamos al consultorio para que se comunique con vos.")
+    if conv["consumer_id"]:
+        # v0.2.8 (24/08) -- hallazgo real (test): si esta conversación ya
+        # arrancó con el paciente identificado (ej. reprogramación que
+        # necesitó DNI para encontrar el turno viejo), no tiene sentido
+        # volver a intentar por teléfono -- ese número nunca va a matchear
+        # (por eso hizo falta identificarlo en primer lugar), y sin este
+        # atajo quedaba pidiendo DNI en loop cada vez que confirmaba algo.
+        paciente = {"id": conv["consumer_id"]}
+    else:
+        try:
+            paciente = drapp_client.buscar_paciente_por_telefono(telefono)
+        except drapp_client.DrAppAPIError:
+            return _sin_accion("Tuvimos un problema para confirmar tu turno -- ya avisamos al consultorio para que se comunique con vos.")
 
     if paciente is None:
         _pedir_identificacion(conv["id"], eleccion_index=eleccion_index)
@@ -510,6 +539,8 @@ def _procesar_eleccion_horario(conv, telefono, texto, mensaje_id=None):
             "tu nombre y apellido completo y confirmamos el turno enseguida."
         )
 
+    if conv["tipo"] == "reprogramacion":
+        return _confirmar_reprogramacion(conv, especialidad, paciente, elegido)
     return _reservar_turno(conv["id"], especialidad, resource_id, service_key, paciente, elegido)
 
 
@@ -565,6 +596,51 @@ def _reservar_turno(conv_id, especialidad, resource_id, service_key, paciente, e
     }
 
 
+def _confirmar_reprogramacion(conv, especialidad, paciente, elegido):
+    """v0.2.8 (24/08) -- pedido real de Nicolás: reprogramar un turno en un
+    solo paso (antes había que cancelar y pedir uno nuevo aparte). Mueve el
+    turno VIEJO (`conv["drapp_event_id"]`, guardado desde que se ofrecieron
+    los horarios nuevos) al día/hora elegidos -- DrApp lo actualiza en el
+    lugar, no crea un evento nuevo."""
+    event_id = conv["drapp_event_id"]
+    try:
+        turno = drapp_client.reprogramar_turno(event_id, elegido["day"], elegido["time"])
+    except drapp_client.DrAppConflictError:
+        _marcar_conversacion(conv["id"], "expirado")
+        return _sin_accion(
+            f"Uy, justo se ocupó el horario del {elegido['label']} mientras esperábamos tu respuesta 😅 "
+            "¿querés que te busquemos otros horarios? Escribinos de nuevo pidiendo reprogramar."
+        )
+    except drapp_client.DrAppAPIError:
+        return _sin_accion("Tuvimos un problema para reprogramar tu turno en el sistema -- ya avisamos al consultorio para que se comunique con vos.")
+
+    ubicacion = (turno or {}).get("location") or {}
+    ubicacion_esperada = ESPECIALIDADES[especialidad]["ubicacion_id"]
+    if ubicacion.get("id") and ubicacion["id"] != ubicacion_esperada:
+        # v0.2.8 (24/08) -- misma red de seguridad que crear un turno nuevo
+        # (ver _reservar_turno) -- pero acá NO se cancela nada: el turno ya
+        # se movió de verdad en DrApp, solo quedó en el consultorio que no
+        # corresponde. Revertirlo agregaría más riesgo que dejarlo para que
+        # una persona lo resuelva a mano -- se deriva, no se le confirma
+        # nada al paciente hasta que esté resuelto.
+        _marcar_conversacion(conv["id"], "derivado")
+        return _sin_accion(
+            "Uy, tuvimos un problema para reprogramar tu turno en el consultorio correcto 😅 "
+            "ya avisamos al consultorio para que se comunique con vos y lo resolvamos enseguida."
+        )
+
+    _marcar_conversacion(conv["id"], "confirmado", drapp_event_id=event_id)
+    lugar = ubicacion.get("label") or ubicacion.get("address")
+    lugar_texto = f", en {lugar}" if lugar else ""
+    nombre = _primer_nombre(paciente)
+    emoji = "🤍" if especialidad == "psiquiatria" else "✅"
+    saludo = f"¡Listo, {nombre}! {emoji}" if nombre else f"¡Listo! {emoji}"
+    return {
+        "texto": f"{saludo} Reprogramamos tu turno para el {elegido['label']}{lugar_texto}. Te esperamos con gusto. Consultorio Dr. Nicolás Buso.",
+        "accion": "turno_reprogramado",
+    }
+
+
 def _procesar_identificacion(conv, texto):
     """El paciente ya mandó su DNI o nombre completo -- un solo intento:
     si no matchea a exactamente una persona, se deriva directo (nunca
@@ -584,6 +660,21 @@ def _procesar_identificacion(conv, texto):
 
     if conv["tipo"] == "cancelacion":
         return _cancelar_para_paciente(conv["id"], paciente)
+
+    if conv["tipo"] == "reprogramacion":
+        if conv["eleccion_index"] is not None:
+            # Ya había elegido el horario nuevo antes de que hiciera falta
+            # identificarlo (ver _procesar_eleccion_horario) -- se retoma
+            # esa elección en vez de volver a preguntar.
+            especialidad = conv["especialidad"] or "medicina_general"
+            opciones = json.loads(conv["opciones_json"])
+            elegido = opciones[conv["eleccion_index"]]
+            return _confirmar_reprogramacion(conv, especialidad, paciente, elegido)
+        # Todavía no sabíamos ni cuál es su turno actual -- recién ahora,
+        # identificado, se lo busca (misma conversación que en
+        # iniciar_reprogramacion cuando el teléfono no matcheaba).
+        _marcar_conversacion(conv["id"], "expirado")
+        return _iniciar_reprogramacion_para_paciente(conv["telefono"], paciente)
 
     # tipo == "turno_nuevo"
     especialidad = conv["especialidad"] or "medicina_general"
@@ -608,6 +699,92 @@ def _especialidad_de_label(service_label: str):
     if "medicina general" in label:
         return "medicina_general"
     return None
+
+
+def _turnos_futuros_del_paciente(paciente) -> list:
+    """Turnos futuros (booked, Medicina General o Psiquiatría) de este
+    paciente, como lista de (turno, turno_dt, especialidad) -- compartido
+    entre cancelación y reprogramación, las dos necesitan encontrar
+    exactamente UN turno futuro antes de tocar nada. Puede levantar
+    drapp_client.DrAppAPIError -- lo maneja quien llama."""
+    turnos = drapp_client.listar_turnos_de_paciente(paciente["id"])
+    ahora = datetime.datetime.now()
+    futuros = []
+    for t in turnos:
+        if t.get("status") != "booked":
+            continue
+        # v0.2.7 (20/08) -- solo Medicina General/Psiquiatría -- cualquier
+        # otra especialidad (si comparte cuenta de DrApp) se ignora, este
+        # bot no la gestiona.
+        especialidad = _especialidad_de_label((t.get("service") or {}).get("label"))
+        if especialidad is None:
+            continue
+        try:
+            turno_dt = datetime.datetime.strptime(f"{t['day']} {t['time']}", "%Y-%m-%d %H:%M")
+        except (KeyError, ValueError, TypeError):
+            continue
+        if turno_dt > ahora:
+            futuros.append((t, turno_dt, especialidad))
+    return futuros
+
+
+def iniciar_reprogramacion(telefono: str, mensaje_id: str = None):
+    """v0.2.8 (24/08) -- pedido real de Nicolás: reprogramar en un solo
+    paso, en vez de cancelar y tener que pedir un turno nuevo aparte.
+    Busca el único turno futuro del paciente y ofrece horarios nuevos de
+    la MISMA especialidad -- misma ventana de 24hs y mismos criterios de
+    ambigüedad que cancelación (nunca toca un turno que no esté
+    clarísimo). None (no dict) si DrApp no está configurado."""
+    if not _drapp_activo():
+        return None
+
+    try:
+        paciente = drapp_client.buscar_paciente_por_telefono(telefono)
+    except drapp_client.DrAppAPIError:
+        return _sin_accion("Tuvimos un problema para buscar tu turno -- ya avisamos al consultorio para que se comunique con vos.")
+
+    if paciente is None:
+        _crear_conversacion(telefono, tipo="reprogramacion", estado="esperando_identificacion", mensaje_id=mensaje_id)
+        return _sin_accion(
+            "No te encuentro en el sistema con este número, pero no hay problema -- pasame tu DNI o "
+            "tu nombre y apellido completo y buscamos tu turno para reprogramarlo."
+        )
+
+    return _iniciar_reprogramacion_para_paciente(telefono, paciente, mensaje_id=mensaje_id)
+
+
+def _iniciar_reprogramacion_para_paciente(telefono, paciente, mensaje_id=None):
+    try:
+        futuros = _turnos_futuros_del_paciente(paciente)
+    except drapp_client.DrAppAPIError:
+        return _sin_accion("Tuvimos un problema para buscar tu turno -- ya avisamos al consultorio para que se comunique con vos.")
+
+    if len(futuros) == 0:
+        return _sin_accion("No encontré ningún turno a tu nombre para reprogramar -- ¿me confirmás la fecha, para poder ayudarte?")
+    if len(futuros) > 1:
+        return _sin_accion(
+            "Veo que tenés más de un turno agendado -- para no reprogramar el que no corresponde, ya "
+            "avisamos al consultorio para que confirme con vos cuál es."
+        )
+
+    turno, turno_dt, especialidad = futuros[0]
+    label_actual = _label_legible(turno["day"], turno["time"])
+    horas_hasta = (turno_dt - datetime.datetime.now()).total_seconds() / 3600
+
+    if horas_hasta < VENTANA_CANCELACION_HORAS:
+        return _sin_accion(
+            f"Tu turno del {label_actual} es en menos de 24hs -- para reprogramarlo, alguien del "
+            "consultorio te va a contactar directamente. ¡Gracias por avisar con tiempo!"
+        )
+
+    ofrecido = _ofrecer_horarios_especialidad(
+        especialidad, telefono, mensaje_id=mensaje_id,
+        tipo="reprogramacion", drapp_event_id=turno["id"], turno_actual_label=label_actual,
+        consumer_id=paciente["id"],
+    )
+    if ofrecido is None:
+        return _sin_accion("Tuvimos un problema técnico para reprogramar tu turno -- alguien del consultorio te va a contactar.")
+    return ofrecido
 
 
 def iniciar_cancelacion(telefono: str, mensaje_id: str = None):
@@ -637,29 +814,11 @@ def iniciar_cancelacion(telefono: str, mensaje_id: str = None):
 
 def _cancelar_para_paciente(conv_id, paciente):
     try:
-        turnos = drapp_client.listar_turnos_de_paciente(paciente["id"])
+        futuros = _turnos_futuros_del_paciente(paciente)
     except drapp_client.DrAppAPIError:
         return _sin_accion("Tuvimos un problema para buscar tu turno -- ya avisamos al consultorio para que se comunique con vos.")
 
     ahora = datetime.datetime.now()
-    futuros = []
-    for t in turnos:
-        if t.get("status") != "booked":
-            continue
-        # v0.2.7 (20/08) -- antes se excluía Psiquiatría a propósito (no se
-        # cancelaba por WhatsApp) -- ahora se incluye, pero SOLO Medicina
-        # General/Psiquiatría; cualquier otra especialidad (si comparte
-        # cuenta de DrApp) se ignora, este bot no la gestiona.
-        especialidad = _especialidad_de_label((t.get("service") or {}).get("label"))
-        if especialidad is None:
-            continue
-        try:
-            turno_dt = datetime.datetime.strptime(f"{t['day']} {t['time']}", "%Y-%m-%d %H:%M")
-        except (KeyError, ValueError, TypeError):
-            continue
-        if turno_dt > ahora:
-            futuros.append((t, turno_dt, especialidad))
-
     if len(futuros) == 0:
         if conv_id:
             _marcar_conversacion(conv_id, "derivado")

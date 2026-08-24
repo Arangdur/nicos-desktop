@@ -796,6 +796,187 @@ class TestIniciarCancelacion(_BaseTemp):
         mock_cancelar.assert_not_called()
 
 
+class TestIniciarReprogramacion(_BaseTemp):
+    """v0.2.8 (24/08) -- pedido real de Nicolás: reprogramar en un solo
+    paso (buscar el turno actual + ofrecer horarios nuevos de la misma
+    especialidad + mover el turno viejo al elegido), en vez de cancelar y
+    tener que pedir uno nuevo aparte."""
+
+    def _conv_de(self, telefono):
+        conn = db.get_connection()
+        return dict(conn.execute(
+            "SELECT * FROM turnos_conversacion WHERE telefono = ? ORDER BY creado_at DESC LIMIT 1", (telefono,)
+        ).fetchone())
+
+    def test_sin_drapp_configurado_devuelve_none(self):
+        os.environ.pop("DRAPP_RESOURCE_ID", None)
+        os.environ.pop("DRAPP_SERVICE_KEY_MEDICINA_GENERAL", None)
+        self.assertIsNone(turnos_conversacion.iniciar_reprogramacion("+5493584390060"))
+
+    @patch("drapp_client.buscar_paciente_por_telefono", return_value=None)
+    def test_paciente_no_encontrado_por_telefono_pide_identificacion(self, mock_buscar):
+        telefono = "+5493584390061"
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.iniciar_reprogramacion(telefono)
+        self.assertIn("no te encuentro", resultado["texto"].lower())
+        self.assertIsNone(resultado["accion"])
+        conv = self._conv_de(telefono)
+        self.assertEqual(conv["estado"], "esperando_identificacion")
+        self.assertEqual(conv["tipo"], "reprogramacion")
+
+    @patch("drapp_client.listar_turnos_de_paciente", return_value=[])
+    @patch("drapp_client.buscar_paciente_por_telefono", return_value={"id": "consumers/x"})
+    def test_sin_turnos_futuros_no_ofrece_nada(self, mock_buscar, mock_listar):
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.iniciar_reprogramacion("+5493584390062")
+        self.assertIn("no encontré", resultado["texto"].lower())
+        self.assertIsNone(resultado["accion"])
+
+    @patch("drapp_client.listar_turnos_de_paciente")
+    @patch("drapp_client.buscar_paciente_por_telefono", return_value={"id": "consumers/x"})
+    def test_dos_turnos_futuros_deriva(self, mock_buscar, mock_listar):
+        import datetime
+        en_3_dias = (datetime.datetime.now() + datetime.timedelta(days=3))
+        base = {
+            "status": "booked", "service": {"label": "Medicina General / Consulta"},
+            "day": en_3_dias.strftime("%Y-%m-%d"), "time": en_3_dias.strftime("%H:%M"),
+        }
+        mock_listar.return_value = [dict(base, id="events/uno"), dict(base, id="events/dos")]
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.iniciar_reprogramacion("+5493584390063")
+        self.assertIn("más de un turno", resultado["texto"].lower())
+        self.assertIsNone(resultado["accion"])
+
+    @patch("drapp_client.listar_turnos_de_paciente")
+    @patch("drapp_client.buscar_paciente_por_telefono", return_value={"id": "consumers/x"})
+    def test_menos_de_24hs_deriva_no_ofrece(self, mock_buscar, mock_listar):
+        import datetime
+        en_5_horas = (datetime.datetime.now() + datetime.timedelta(hours=5))
+        mock_listar.return_value = [{
+            "id": "events/abc", "status": "booked",
+            "service": {"label": "Medicina General / Consulta"},
+            "day": en_5_horas.strftime("%Y-%m-%d"), "time": en_5_horas.strftime("%H:%M"),
+        }]
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.iniciar_reprogramacion("+5493584390064")
+        self.assertIn("menos de 24hs", resultado["texto"].lower())
+        self.assertIsNone(resultado["accion"])
+
+    @patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE)
+    @patch("drapp_client.listar_turnos_de_paciente")
+    @patch("drapp_client.buscar_paciente_por_telefono", return_value={"id": "consumers/x"})
+    def test_24hs_o_mas_ofrece_horarios_nuevos_de_la_misma_especialidad(self, mock_buscar, mock_listar, mock_disp):
+        import datetime
+        en_3_dias = (datetime.datetime.now() + datetime.timedelta(days=3))
+        mock_listar.return_value = [{
+            "id": "events/viejo", "status": "booked",
+            "service": {"label": "Medicina General / Consulta"},
+            "day": en_3_dias.strftime("%Y-%m-%d"), "time": en_3_dias.strftime("%H:%M"),
+        }]
+        telefono = "+5493584390065"
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.iniciar_reprogramacion(telefono)
+        self.assertIn("reprogramar tu turno", resultado["texto"].lower())
+        self.assertIn("1)", resultado["texto"])
+        self.assertIsNone(resultado["accion"])  # todavía no se movió nada
+        conv = self._conv_de(telefono)
+        self.assertEqual(conv["tipo"], "reprogramacion")
+        self.assertEqual(conv["estado"], "esperando_eleccion")
+        self.assertEqual(conv["especialidad"], "medicina_general")
+        self.assertEqual(conv["drapp_event_id"], "events/viejo")  # el turno VIEJO a mover
+
+    @patch("drapp_client.reprogramar_turno")
+    @patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE)
+    @patch("drapp_client.listar_turnos_de_paciente")
+    @patch("drapp_client.buscar_paciente_por_telefono", return_value={"id": "consumers/x"})
+    @patch("ai_router.interpretar_eleccion_turno", return_value={"outcome": "success", "data": {"eleccion": 0}})
+    def test_eleccion_confirma_la_reprogramacion_de_verdad(self, mock_interp, mock_buscar, mock_listar, mock_disp, mock_reprog):
+        import datetime
+        en_3_dias = (datetime.datetime.now() + datetime.timedelta(days=3))
+        mock_listar.return_value = [{
+            "id": "events/viejo", "status": "booked",
+            "service": {"label": "Medicina General / Consulta"},
+            "day": en_3_dias.strftime("%Y-%m-%d"), "time": en_3_dias.strftime("%H:%M"),
+        }]
+        mock_reprog.return_value = {
+            "id": "events/viejo",
+            "location": {"id": "place-46ace5", "label": "Aneit", "address": "Ordoñez"},
+        }
+        telefono = "+5493584390066"
+        with patch.dict(os.environ, DRAPP_ENV):
+            turnos_conversacion.iniciar_reprogramacion(telefono)
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "el primero")
+
+        self.assertIn("reprogramamos", resultado["texto"].lower())
+        self.assertEqual(resultado["accion"], "turno_reprogramado")
+        mock_reprog.assert_called_once_with("events/viejo", "2026-08-20", "11:00")
+        conv = self._conv_de(telefono)
+        self.assertEqual(conv["estado"], "confirmado")
+
+    @patch("drapp_client.reprogramar_turno")
+    @patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE)
+    @patch("drapp_client.listar_turnos_de_paciente")
+    @patch("drapp_client.buscar_paciente_por_telefono", return_value={"id": "consumers/x"})
+    @patch("ai_router.interpretar_eleccion_turno", return_value={"outcome": "success", "data": {"eleccion": 0}})
+    def test_reprogramacion_en_consultorio_equivocado_se_deriva_no_confirma(self, mock_interp, mock_buscar, mock_listar, mock_disp, mock_reprog):
+        # Misma red de seguridad que crear un turno nuevo -- pero acá no se
+        # "cancela" nada (el turno YA se movió en DrApp), se deriva para
+        # que una persona lo resuelva a mano.
+        import datetime
+        en_3_dias = (datetime.datetime.now() + datetime.timedelta(days=3))
+        mock_listar.return_value = [{
+            "id": "events/viejo", "status": "booked",
+            "service": {"label": "Medicina General / Consulta"},
+            "day": en_3_dias.strftime("%Y-%m-%d"), "time": en_3_dias.strftime("%H:%M"),
+        }]
+        mock_reprog.return_value = {
+            "id": "events/viejo",
+            "location": {"id": "place-7mtlojwwiev0sezrafw9oe", "label": "P-SIA", "address": "Justiniano Posse"},
+        }
+        telefono = "+5493584390067"
+        with patch.dict(os.environ, DRAPP_ENV):
+            turnos_conversacion.iniciar_reprogramacion(telefono)
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "el primero")
+
+        self.assertIsNone(resultado["accion"])
+        self.assertNotIn("reprogramamos", resultado["texto"].lower())
+        conv = self._conv_de(telefono)
+        self.assertEqual(conv["estado"], "derivado")
+
+    @patch("drapp_client.reprogramar_turno")
+    @patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE)
+    @patch("drapp_client.listar_turnos_de_paciente")
+    @patch("drapp_client.buscar_pacientes_por_texto")
+    @patch("drapp_client.buscar_paciente_por_telefono", return_value=None)
+    @patch("ai_router.interpretar_eleccion_turno", return_value={"outcome": "success", "data": {"eleccion": 0}})
+    def test_identificacion_de_reprogramacion_con_match_unico_ofrece_y_confirma(
+        self, mock_interp, mock_buscar_tel, mock_buscar_texto, mock_listar, mock_disp, mock_reprog,
+    ):
+        import datetime
+        telefono = "+5493584390068"
+        with patch.dict(os.environ, DRAPP_ENV):
+            turnos_conversacion.iniciar_reprogramacion(telefono)  # pide identificación
+
+        en_3_dias = datetime.datetime.now() + datetime.timedelta(days=3)
+        mock_buscar_texto.return_value = [{"id": "consumers/dni40123456"}]
+        mock_listar.return_value = [{
+            "id": "events/viejo", "status": "booked",
+            "service": {"label": "Medicina General / Consulta"},
+            "day": en_3_dias.strftime("%Y-%m-%d"), "time": en_3_dias.strftime("%H:%M"),
+        }]
+        mock_reprog.return_value = {"id": "events/viejo", "location": {"id": "place-46ace5"}}
+
+        with patch.dict(os.environ, DRAPP_ENV):
+            ofrecido = turnos_conversacion.procesar_eleccion(telefono, "40123456")
+        self.assertIn("reprogramar tu turno", ofrecido["texto"].lower())
+        self.assertEqual(self._conv_de(telefono)["tipo"], "reprogramacion")
+
+        with patch.dict(os.environ, DRAPP_ENV):
+            resultado = turnos_conversacion.procesar_eleccion(telefono, "el primero")
+        self.assertEqual(resultado["accion"], "turno_reprogramado")
+        mock_reprog.assert_called_once_with("events/viejo", "2026-08-20", "11:00")
+
+
 class TestIntegracionMensajesWhatsapp(_BaseTemp):
     @patch("ai_router.clasificar_y_redactar_mensaje")
     def test_conversacion_activa_salta_la_clasificacion_generica(self, mock_clasificar):
@@ -850,6 +1031,35 @@ class TestIntegracionMensajesWhatsapp(_BaseTemp):
 
         mensaje = mensajes_whatsapp.list_mensajes()[0]
         self.assertEqual(mensaje["borrador_respuesta"], "alguien va a confirmar el horario")
+
+    @patch("drapp_client.consultar_disponibilidad", return_value=DISPONIBILIDAD_FAKE)
+    @patch("drapp_client.listar_turnos_de_paciente")
+    @patch("drapp_client.buscar_paciente_por_telefono", return_value={"id": "consumers/x"})
+    @patch("ai_router.clasificar_y_redactar_mensaje")
+    def test_reprogramacion_con_drapp_ofrece_horarios_nuevos(self, mock_clasificar, mock_buscar, mock_listar, mock_disp):
+        # v0.2.8 (24/08) -- pedido real de Nicolás: "reprogramacion" ya era
+        # una clasificación válida de la IA, pero nunca estaba conectada a
+        # ninguna acción real -- siempre caía en el texto genérico.
+        import datetime
+        en_3_dias = datetime.datetime.now() + datetime.timedelta(days=3)
+        mock_listar.return_value = [{
+            "id": "events/viejo", "status": "booked",
+            "service": {"label": "Medicina General / Consulta"},
+            "day": en_3_dias.strftime("%Y-%m-%d"), "time": en_3_dias.strftime("%H:%M"),
+        }]
+        mock_clasificar.return_value = {
+            "outcome": "success",
+            "data": {"clasificacion": "reprogramacion", "requiere_profesional": False, "urgente": False, "borrador_respuesta": "texto genérico de la IA"},
+        }
+        mensaje_id = mensajes_whatsapp.registrar_mensaje_entrante("+5493584390033", "quiero cambiar mi turno")["id"]
+
+        with patch.dict(os.environ, DRAPP_ENV):
+            mensajes_whatsapp.generar_borrador(mensaje_id)
+
+        mensaje = mensajes_whatsapp.list_mensajes()[0]
+        self.assertIn("reprogramar tu turno", mensaje["borrador_respuesta"].lower())
+        self.assertNotIn("texto genérico", mensaje["borrador_respuesta"])
+        self.assertIsNone(mensaje["accion_drapp"])  # solo ofreció, todavía no movió nada
 
 
 class TestListConversacionesRecientes(_BaseTemp):

@@ -19,6 +19,12 @@ const CLASIFICACION_LABEL_OP = {
 const ACCION_DRAPP_LABEL_OP = {
   turno_creado: 'Turno ya creado en DrApp',
   turno_cancelado: 'Turno ya cancelado en DrApp',
+  turno_reprogramado: 'Turno ya reprogramado en DrApp',
+};
+const ACCION_DRAPP_VERBO_OP = {
+  turno_creado: 'se creó',
+  turno_cancelado: 'se canceló',
+  turno_reprogramado: 'se reprogramó',
 };
 // v0.2.5 -- Impeccable P2 (re-critique): borrador_generado usaba el mismo
 // tag rojo "nuevo" que Urgente/Para Nicolás -- un borrador de rutina se veía
@@ -108,7 +114,7 @@ async function _renderListaMensajesWhatsappOperativa() {
       // de verdad en DrApp -- rechazar esto NO lo deshace, solo evita que
       // el paciente se entere por WhatsApp. Aviso explícito para no confundir.
       const avisoTexto = m.accion_drapp
-        ? `El turno ya ${m.accion_drapp === 'turno_creado' ? 'se creó' : 'se canceló'} en DrApp -- rechazar esto NO lo deshace, solo evita que el paciente reciba este mensaje.`
+        ? `El turno ya ${ACCION_DRAPP_VERBO_OP[m.accion_drapp] || 'se modificó'} en DrApp -- rechazar esto NO lo deshace, solo evita que el paciente reciba este mensaje.`
         : 'El borrador se descarta, no se manda nada.';
       const ok = await showConfirm('Rechazar este mensaje', avisoTexto, { confirmLabel: 'Rechazar', danger: true });
       if (!ok) return;

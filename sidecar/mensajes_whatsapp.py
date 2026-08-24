@@ -197,6 +197,13 @@ def generar_borrador(mensaje_id: str) -> dict:
         if cancelado is not None:
             borrador_respuesta = cancelado["texto"]
             accion_drapp = cancelado["accion"]
+    elif data["clasificacion"] == "reprogramacion":
+        # v0.2.8 (24/08) -- pedido real de Nicolás: reprogramar en un solo
+        # paso en vez de cancelar y tener que pedir un turno nuevo aparte.
+        reprogramado = turnos_conversacion.iniciar_reprogramacion(row["telefono"], mensaje_id=mensaje_id)
+        if reprogramado is not None:
+            borrador_respuesta = reprogramado["texto"]
+            accion_drapp = reprogramado["accion"]
     elif data["clasificacion"] == "receta":
         # v0.2.7 (20/08) -- pedido real de Nicolás: el acuse de "recibimos
         # tu pedido" no necesita esperar aprobación -- texto fijo (no el
