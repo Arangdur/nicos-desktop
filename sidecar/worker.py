@@ -509,7 +509,14 @@ def _sincronizar_drapp_si_corresponde():
     for evento in eventos:
         consumer = evento.get("consumer") or {}
         consumer_id = consumer.get("id")
-        nombre = f"{consumer.get('lastName', '')}, {consumer.get('firstName', '')}".strip(", ")
+        # v0.2.9 (25/08) -- hallazgo real comparando contra la agenda real de
+        # DrApp: el consumer embebido en /events NO tiene firstName/lastName
+        # (esos campos no existen en esta versión de la API) -- viene armado
+        # como "label": "Apellido, nombre". Con el código viejo, TODOS los
+        # turnos entraban como "(sin nombre en DrApp)" aunque el paciente
+        # estuviera perfectamente cargado -- no era un problema de datos
+        # faltantes en DrApp, era leer el campo que no existe.
+        nombre = consumer.get("label", "").strip()
         telefono = None
         if consumer_id:
             try:

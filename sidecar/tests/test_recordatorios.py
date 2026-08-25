@@ -382,9 +382,16 @@ class TestWorkerGlue(unittest.TestCase):
         # creado_by tiene FK contra users(user_id), así que esto tiraba
         # sqlite3.IntegrityError y se llevaba el hilo del worker entero (ver
         # worker.run_forever). No debe volver a pasar.
+        # "label": "Apellido, nombre" es el shape REAL del consumer embebido
+        # en /events (confirmado en vivo el 25/08 contra la cuenta real de
+        # producción) -- este mock tenía firstName/lastName, que no existen
+        # en esa respuesta, y por eso el bug de "(sin nombre en DrApp)" para
+        # turnos que sí tenían paciente cargado pasó completamente
+        # desapercibido: el test "pasaba" con un shape que la API real nunca
+        # manda.
         mock_list.return_value = [{
             "id": "events/abc123", "day": "2026-08-20", "time": "10:00",
-            "service": {"label": "Medicina General"}, "consumer": {"id": "consumers/xyz", "firstName": "Juan", "lastName": "Pérez"},
+            "service": {"label": "Medicina General"}, "consumer": {"id": "consumers/xyz", "label": "Pérez, Juan"},
         }]
         with patch.dict(os.environ, {"DRAPP_API_KEY": "drapp_live_test", "DRAPP_TEAM_ID": "4641e3fd"}):
             with patch("drapp_client.get_telefono_paciente", return_value="+5493584390000"):
@@ -394,6 +401,24 @@ class TestWorkerGlue(unittest.TestCase):
         turnos = recordatorios.list_recordatorios()
         self.assertEqual(len(turnos), 1)
         self.assertEqual(turnos[0]["creado_by"], "nicolas")
+        self.assertEqual(turnos[0]["paciente_nombre"], "Pérez, Juan")
+
+    @patch("drapp_client.list_turnos_medicina_general")
+    def test_sync_drapp_evento_sin_consumer_cae_al_fallback(self, mock_list):
+        # v0.2.9 -- caso real distinto al de arriba: un evento sin paciente
+        # vinculado en absoluto (consumer vacío) sigue mostrando el
+        # fallback "(sin nombre en DrApp)" en vez de romper.
+        mock_list.return_value = [{
+            "id": "events/sinconsumer", "day": "2026-08-20", "time": "11:00",
+            "service": {"label": "Medicina General"}, "consumer": {},
+        }]
+        with patch.dict(os.environ, {"DRAPP_API_KEY": "drapp_live_test", "DRAPP_TEAM_ID": "4641e3fd"}):
+            worker._ultimo_sync_drapp = None
+            worker._sincronizar_drapp_si_corresponde()
+
+        turnos = recordatorios.list_recordatorios()
+        self.assertEqual(turnos[0]["paciente_nombre"], "(sin nombre en DrApp)")
+        self.assertEqual(turnos[0]["estado"], "sin_telefono")
 
 
 if __name__ == "__main__":
