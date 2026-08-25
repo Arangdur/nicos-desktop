@@ -92,15 +92,27 @@ def importar_turnos(turnos: list, created_by: str):
     return {"importados": len(creados), "ids": creados}
 
 
-def list_recordatorios(estado: str = None):
+def list_recordatorios(estado: str = None, incluir_pasados: bool = False):
+    """v0.2.10 (25/08) -- hallazgo real de Nicolás: esta lista nunca filtraba
+    por fecha, así que un turno de ayer se quedaba mostrado para siempre
+    (el sync tampoco lo vuelve a tocar una vez que pasó -- ver
+    _sincronizar_drapp_si_corresponde en worker.py, solo mira desde "hoy").
+    Por default se esconden los turnos de días anteriores a hoy -- ya
+    pasaron, no hay recordatorio que mandar. `incluir_pasados=True` para
+    quien necesite ver el histórico completo."""
     if estado is not None and estado not in ESTADOS_VALIDOS:
         raise RecordatorioError(f"Estado inválido: {estado}")
     conn = db.get_connection()
     query = "SELECT * FROM recordatorios_turnos"
+    where = []
     params = []
     if estado:
-        query += " WHERE estado = ?"
+        where.append("estado = ?")
         params.append(estado)
+    if not incluir_pasados:
+        where.append("fecha_turno >= date('now', 'localtime')")
+    if where:
+        query += " WHERE " + " AND ".join(where)
     query += " ORDER BY fecha_turno, hora_turno"
     return [dict(r) for r in conn.execute(query, params).fetchall()]
 

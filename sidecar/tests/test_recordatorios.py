@@ -69,9 +69,13 @@ def _pair(role, display_name):
 
 
 def _turno(**overrides):
+    # v0.2.10 -- era una fecha fija ("2026-08-01") que quedaba en el pasado
+    # apenas avanzaba el calendario real, y list_recordatorios() ahora
+    # esconde turnos pasados por default (ver recordatorios.py) -- son
+    # tests, no dependen de qué día es "hoy" de verdad, así que usan mañana.
     base = {
         "paciente_nombre": "Paciente, De Prueba",
-        "fecha_turno": "2026-08-01",
+        "fecha_turno": (datetime.date.today() + datetime.timedelta(days=1)).isoformat(),
         "hora_turno": "10:00",
         "cobertura": "PAMI",
         "practica": "Medicina General",
@@ -398,7 +402,10 @@ class TestWorkerGlue(unittest.TestCase):
                 worker._ultimo_sync_drapp = None
                 worker._sincronizar_drapp_si_corresponde()  # no debe levantar
 
-        turnos = recordatorios.list_recordatorios()
+        # incluir_pasados=True: el "day" del mock es un literal fijo sin
+        # relación con "hoy" real (ver recordatorios.list_recordatorios,
+        # v0.2.10 -- esconde turnos pasados por default).
+        turnos = recordatorios.list_recordatorios(incluir_pasados=True)
         self.assertEqual(len(turnos), 1)
         self.assertEqual(turnos[0]["creado_by"], "nicolas")
         self.assertEqual(turnos[0]["paciente_nombre"], "Pérez, Juan")
@@ -416,7 +423,10 @@ class TestWorkerGlue(unittest.TestCase):
             worker._ultimo_sync_drapp = None
             worker._sincronizar_drapp_si_corresponde()
 
-        turnos = recordatorios.list_recordatorios()
+        # incluir_pasados=True: el "day" del mock es un literal fijo sin
+        # relación con "hoy" real (ver recordatorios.list_recordatorios,
+        # v0.2.10 -- esconde turnos pasados por default).
+        turnos = recordatorios.list_recordatorios(incluir_pasados=True)
         self.assertEqual(turnos[0]["paciente_nombre"], "(sin nombre en DrApp)")
         self.assertEqual(turnos[0]["estado"], "sin_telefono")
 

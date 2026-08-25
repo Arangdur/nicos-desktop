@@ -330,7 +330,8 @@ class Handler(BaseHTTPRequestHandler):
                     from urllib.parse import parse_qs
                     qs = parse_qs(parsed.query)
                 estado = qs.get("estado", [None])[0]
-                self._send_json(200, {"ok": True, "recordatorios": recordatorios.list_recordatorios(estado)})
+                incluir_pasados = qs.get("incluir_pasados", [""])[0] == "true"
+                self._send_json(200, {"ok": True, "recordatorios": recordatorios.list_recordatorios(estado, incluir_pasados)})
             elif path == "/api/v1/whatsapp/mensajes":
                 # Director + Operativa -- misma lógica que recordatorios: Marianela
                 # necesita ver y poder resolver los borradores no-clínicos, el
