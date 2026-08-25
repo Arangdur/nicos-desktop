@@ -30,12 +30,16 @@ class TestEstadoWorker(unittest.TestCase):
         self.assertIsNone(estado["ultimo_error"])
 
     def test_refleja_ultimo_tick_y_ultimo_error(self):
-        worker._worker_iniciado_en = "2026-08-24T10:00:00"
-        worker._ultimo_tick_ok = "2026-08-24T10:05:00"
-        worker._errores_atajados = [{"at": "2026-08-24T10:03:00", "error": "boom"}]
+        # v0.2.9 -- eran fechas fijas ("2026-08-24...") que dejaban de estar
+        # dentro de la ventana de 24hs apenas pasaba la medianoche real y
+        # rompían el test al día siguiente. Ahora relativas a "ahora".
+        ahora = datetime.datetime.utcnow()
+        worker._worker_iniciado_en = (ahora - datetime.timedelta(minutes=10)).isoformat()
+        worker._ultimo_tick_ok = (ahora - datetime.timedelta(minutes=5)).isoformat()
+        worker._errores_atajados = [{"at": (ahora - datetime.timedelta(minutes=7)).isoformat(), "error": "boom"}]
         estado = worker.estado_worker()
-        self.assertEqual(estado["iniciado_en"], "2026-08-24T10:00:00")
-        self.assertEqual(estado["ultimo_tick_ok"], "2026-08-24T10:05:00")
+        self.assertEqual(estado["iniciado_en"], worker._worker_iniciado_en)
+        self.assertEqual(estado["ultimo_tick_ok"], worker._ultimo_tick_ok)
         self.assertEqual(estado["errores_atajados_24hs"], 1)
         self.assertEqual(estado["ultimo_error"]["error"], "boom")
 

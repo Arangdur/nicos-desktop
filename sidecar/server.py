@@ -25,6 +25,7 @@ funciones del Director en su propia máquina).
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -78,13 +79,31 @@ FACTURACION_TELEFONOS_AUTORIZADOS = {
 TASK_FLOW_ENABLED = os.getenv("NICOS_TASK_FLOW_ENABLED", "true").strip().lower() != "false"
 
 
+def _tailscale_bin() -> str:
+    """v0.2.9 (25/08) -- hallazgo real en la Mac de producción: la app
+    empaquetada (lanzada por LaunchServices/Finder, no por una shell) recibe
+    un PATH mínimo (/usr/bin:/bin:/usr/sbin:/sbin) que NO incluye
+    /usr/local/bin ni /opt/homebrew/bin -- ahí es donde vive el binario
+    `tailscale` en una instalación normal. Eso hacía que `_tailscale_running()`
+    tirara FileNotFoundError silencioso y creyera que Tailscale no corría,
+    apagando el servidor de red y dejando a Marianela sin conexión aunque el
+    daemon estuviera perfectamente activo. Se busca en ubicaciones típicas de
+    macOS además del PATH heredado."""
+    candidatos = os.pathsep.join([
+        "/usr/local/bin", "/opt/homebrew/bin",
+        "/Applications/Tailscale.app/Contents/MacOS",
+        os.environ.get("PATH", ""),
+    ])
+    return shutil.which("tailscale", path=candidatos) or "tailscale"
+
+
 def _tailscale_running() -> bool:
     """Confirma que el daemon de Tailscale está activo, no solo que la variable
     de entorno esté seteada — evita bindear a una IP que ya no es válida (ej. el
     usuario desinstaló Tailscale pero la variable quedó vieja en el .env)."""
     try:
         result = subprocess.run(
-            ["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5
+            [_tailscale_bin(), "status", "--json"], capture_output=True, text=True, timeout=5
         )
         return result.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):
