@@ -43,11 +43,10 @@ async function renderSettingsPanelOperativa(containerEl) {
         <dt>Versión instalada</dt><dd>${about.app_version || '—'}</dd>
       </dl>
       <p class="help-text" id="update-status" style="margin-top:var(--space-2);">
-        Nicolás publica las actualizaciones -- acá podés buscarlas cuando quieras, sin esperar (solo funciona en la versión instalada, no en modo desarrollo).
+        Se actualiza sola al abrir la app -- no hace falta hacer nada.
       </p>
       <div class="row-wrap" style="margin-top:var(--space-3);">
         <button class="secondary" id="btn-check-updates">Buscar actualizaciones ahora</button>
-        <button class="primary" id="btn-install-update" style="display:none;">Instalar y reiniciar</button>
       </div>
     </div>
 
@@ -73,7 +72,6 @@ async function renderSettingsPanelOperativa(containerEl) {
   });
 
   const statusEl = containerEl.querySelector('#update-status');
-  const installBtn = containerEl.querySelector('#btn-install-update');
 
   containerEl.querySelector('#btn-check-updates').addEventListener('click', async () => {
     const result = await window.nicos.checkForUpdates();
@@ -82,25 +80,21 @@ async function renderSettingsPanelOperativa(containerEl) {
     }
   });
 
+  // v0.2.9 -- la descarga y la instalación ya no las dispara este panel:
+  // pasan solas en electron/auto-updater.js apenas se detecta una versión
+  // nueva, sin depender de que esta pantalla esté abierta. Acá solo se
+  // refleja el estado para quien esté mirando en ese momento.
   window.nicos.onUpdateStatus(({ status, version, percent, message }) => {
     if (status === 'available') {
-      statusEl.textContent = `Versión ${version} disponible -- descargando...`;
-      window.nicos.downloadUpdate();
+      statusEl.textContent = `Versión ${version} disponible -- descargando sola...`;
     } else if (status === 'downloading') {
       statusEl.textContent = `Descargando actualización... ${percent}%`;
     } else if (status === 'downloaded') {
-      statusEl.textContent = `Versión ${version} lista para instalar.`;
-      installBtn.style.display = 'inline-block';
+      statusEl.textContent = `Versión ${version} descargada -- instalando y reiniciando...`;
     } else if (status === 'error') {
       statusEl.textContent = `Error buscando actualizaciones: ${message}`;
     } else {
       statusEl.textContent = UPDATE_STATUS_LABEL[status] || '';
     }
-  });
-
-  installBtn.addEventListener('click', async () => {
-    const ok = await showConfirm('Instalar actualización', 'La app se va a cerrar y volver a abrir con la nueva versión.', { confirmLabel: 'Instalar y reiniciar' });
-    if (!ok) return;
-    await window.nicos.quitAndInstallUpdate();
   });
 }

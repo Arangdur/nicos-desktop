@@ -18,6 +18,11 @@ let updateCheckInterval = null;
 function _maybeInitAutoUpdater(role) {
   if (role === 'director' || !app.isPackaged) return;
   autoUpdaterModule.init(mainWindow);
+  // v0.2.9 (25/08) -- pedido real de Nicolás: buscar e instalar solas al
+  // abrir, sin esperar las 4hs del intervalo (Marianela/Abate casi nunca
+  // dejan la app abierta tanto tiempo seguido como para que el intervalo
+  // llegue a disparar).
+  autoUpdaterModule.checkForUpdates();
   if (!updateCheckInterval) {
     updateCheckInterval = setInterval(() => autoUpdaterModule.checkForUpdates(), 4 * 60 * 60 * 1000);
   }
