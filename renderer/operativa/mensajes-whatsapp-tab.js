@@ -137,7 +137,7 @@ function _cardMensajeOperativa(m) {
       <div class="row-between">
         <div>
           <div style="font-weight:600;">${escHtml(m.telefono)}</div>
-          <div style="font-size:12px; color:var(--muted);">${new Date(m.recibido_at).toLocaleString('es-AR')}</div>
+          <div style="font-size:12px; color:var(--muted);">${new Date(m.recibido_at + 'Z').toLocaleString('es-AR')}</div>
         </div>
         <div class="row-wrap">
           ${m.urgente ? '<span class="tag nuevo">Urgente</span>' : ''}

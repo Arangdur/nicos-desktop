@@ -65,7 +65,7 @@ function renderTimeline(events) {
         return `
           <li class="${isLast ? 'is-terminal' : ''}">
             <div class="timeline-state">${toLabel}</div>
-            <div class="timeline-meta">${actorLabel} · ${new Date(e.created_at).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
+            <div class="timeline-meta">${actorLabel} · ${new Date(e.created_at + 'Z').toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
           </li>
         `;
       }).join('')}
@@ -130,7 +130,7 @@ async function renderTasksList() {
         <div class="row">
           <span class="tag ${ESTADO_TAG_CLASS[t.state] || 'proceso'}">${ESTADO_LABEL[t.state] || t.state}</span>
           <span style="font-size:var(--text-sm); color:var(--muted);">
-            ${escHtmlTasks(t.submitted_by)} · ${new Date(t.created_at).toLocaleString('es-AR')}
+            ${escHtmlTasks(t.submitted_by)} · ${new Date(t.created_at + 'Z').toLocaleString('es-AR')}
           </span>
         </div>
         <button class="secondary btn-toggle-detail" data-id="${t.task_id}">Ver detalle</button>

@@ -127,7 +127,7 @@ function _cardFactura(f, facturasEmitidas) {
       <div class="row-between">
         <div>
           <div style="font-weight:600;">${escHtml(f.telefono)}</div>
-          <div style="font-size:12px; color:var(--muted);">${new Date(f.recibido_at).toLocaleString('es-AR')}</div>
+          <div style="font-size:12px; color:var(--muted);">${new Date(f.recibido_at + 'Z').toLocaleString('es-AR')}</div>
         </div>
         <div class="row-wrap" style="gap:var(--space-2);">
           ${f.es_nota_credito ? '<span class="tag proceso">Nota de crédito</span>' : ''}

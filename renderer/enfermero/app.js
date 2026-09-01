@@ -111,7 +111,7 @@ async function _renderNovedadesFeed(residenteId) {
     <div style="border-left:2px solid var(--border); padding:0 0 16px 16px; margin-top:8px;">
       <div style="font-size:12px; color:var(--muted);">
         <span class="tag ${CAT_TAG_CLASS[n.categoria] || ''}" style="margin-right:6px;">${CAT_LABEL[n.categoria] || n.categoria}</span>
-        ${escHtml(n.residente_nombre)} · ${escHtml(n.created_by_nombre)} · ${new Date(n.created_at).toLocaleString('es-AR')}
+        ${escHtml(n.residente_nombre)} · ${escHtml(n.created_by_nombre)} · ${new Date(n.created_at + 'Z').toLocaleString('es-AR')}
       </div>
       <div style="font-size:14px; margin-top:4px;">${escHtml(n.texto)}</div>
     </div>
@@ -222,7 +222,7 @@ async function abrirDetalleResidente(residenteId) {
     <div style="border-left:2px solid var(--border); padding:0 0 16px 16px; margin-top:8px;">
       <div style="font-size:12px; color:var(--muted);">
         <span class="tag ${CAT_TAG_CLASS[n.categoria] || ''}" style="margin-right:6px;">${CAT_LABEL[n.categoria] || n.categoria}</span>
-        ${escHtml(n.created_by_nombre)} · ${new Date(n.created_at).toLocaleString('es-AR')}
+        ${escHtml(n.created_by_nombre)} · ${new Date(n.created_at + 'Z').toLocaleString('es-AR')}
       </div>
       <div style="font-size:14px; margin-top:4px;">${escHtml(n.texto)}</div>
     </div>

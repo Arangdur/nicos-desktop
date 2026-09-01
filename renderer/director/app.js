@@ -30,7 +30,12 @@ async function fetchJson(path, opts) {
 // esperada de cada fuente como para decidir qué es "viejo".
 function tiempoRelativo(fechaISO) {
   if (!fechaISO) return null;
-  const fecha = new Date(fechaISO);
+  // v0.2.13 (01/09) -- hallazgo real de Nicolás: el sidecar siempre manda
+  // datetime.utcnow().isoformat() SIN 'Z' -- sin esto, el navegador lo toma
+  // como hora LOCAL en vez de UTC, y en Argentina (UTC-3) todo se muestra
+  // 3 horas adelantado. Ya tiene 'Z' (viene de un .toISOString() real) casi
+  // nunca pasa acá, pero por las dudas no se duplica si ya la tiene.
+  const fecha = new Date(fechaISO.endsWith('Z') ? fechaISO : fechaISO + 'Z');
   if (Number.isNaN(fecha.getTime())) return null;
   const diffMs = Date.now() - fecha.getTime();
   const dias = Math.floor(diffMs / (1000 * 60 * 60 * 24));

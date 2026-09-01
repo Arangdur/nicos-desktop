@@ -263,7 +263,7 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
       <tr>
         <td>${u.display_name}${u.dni ? `<div style="font-size:12px; color:var(--muted);">DNI ${u.dni}</div>` : ''}</td>
         <td>${ROL_LABEL[u.role] || u.role}${u.turno ? ' · turno ' + (TURNO_LABEL[u.turno] || u.turno) : ''}</td>
-        <td>${u.created_at ? new Date(u.created_at).toLocaleString('es-AR') : '—'}</td>
+        <td>${u.created_at ? new Date(u.created_at + 'Z').toLocaleString('es-AR') : '—'}</td>
         <td>${u.revoked_at ? '<span class="tag nuevo">Revocado</span>' : '<span class="tag resuelto">Activo</span>'}</td>
         <td>${u.revoked_at ? '' : `<button class="secondary btn-revoke" data-id="${u.user_id}">Revocar</button>`}</td>
       </tr>

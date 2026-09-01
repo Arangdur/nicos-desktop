@@ -115,7 +115,7 @@ function _cardMail(m) {
       <div class="row-between">
         <div>
           <div style="font-weight:600;">${escHtml(m.asunto || '(sin asunto)')}</div>
-          <div style="font-size:12px; color:var(--muted);">${escHtml(m.remitente)} — ${new Date(m.recibido_at).toLocaleString('es-AR')}</div>
+          <div style="font-size:12px; color:var(--muted);">${escHtml(m.remitente)} — ${new Date(m.recibido_at + 'Z').toLocaleString('es-AR')}</div>
         </div>
         <div class="row-wrap">
           <span class="tag">${CASILLA_LABEL[m.casilla] || m.casilla}</span>

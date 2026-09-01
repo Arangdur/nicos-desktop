@@ -163,7 +163,7 @@ function _renderNovedades(novedades) {
     <div style="padding:10px 0; border-bottom:1px solid var(--border);">
       <div class="row-between">
         <span class="tag info">${CATEGORIA_LABEL[n.categoria] || n.categoria}</span>
-        <span style="font-size:12px; color:var(--muted);">${n.created_by_nombre} · ${new Date(n.created_at).toLocaleString('es-AR')}</span>
+        <span style="font-size:12px; color:var(--muted);">${n.created_by_nombre} · ${new Date(n.created_at + 'Z').toLocaleString('es-AR')}</span>
       </div>
       <div style="margin-top:4px;">${escHtml(n.texto)}</div>
     </div>
