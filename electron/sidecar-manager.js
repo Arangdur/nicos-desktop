@@ -42,6 +42,20 @@ function startSidecar(envOverrides) {
     sidecarProcess = spawn(command, args, {
       cwd,
       env: { ...process.env, ...envOverrides },
+      // v0.2.12 (01/09) -- hallazgo real en producción: el binario de
+      // PyInstaller (onefile) es un bootloader que spawnea un proceso HIJO
+      // propio -- el que de verdad abre el puerto de red. `.kill()` en
+      // sidecarProcess solo mataba el bootloader; el hijo quedaba huérfano
+      // (reparentado a launchd) y seguía vivo y escuchando en el puerto
+      // viejo -- confirmado: un zombie del 27/08 siguió sirviendo pedidos
+      // reales de Marianela durante 5 DÍAS con una API key vieja, mientras
+      // el proceso "nuevo" ni siquiera lograba bindear el puerto de red
+      // (ya estaba tomado) y quedaba solo en un puerto local efímero sin
+      // que nadie lo notara. `detached: true` en POSIX hace que el
+      // bootloader sea líder de su propio grupo de procesos -- cualquier
+      // hijo que spawnee hereda ese mismo grupo, así que matar el GRUPO
+      // completo (ver stopSidecar) mata a los dos.
+      detached: process.platform !== 'win32',
     });
 
     let resolved = false;
@@ -110,18 +124,45 @@ function startSidecar(envOverrides) {
   return readyPromise;
 }
 
+// Devuelve una promesa que se resuelve cuando el proceso realmente terminó
+// (evento 'exit'), no apenas se le mandó la señal -- SIGTERM no es
+// instantáneo, y arrancar el reemplazo antes de que el viejo soltara el
+// puerto es exactamente lo que dejó vivo al zombie del 27/08 (ver comentario
+// en startSidecar). Escala a SIGKILL si a los 3s segundos no murió solo.
 function stopSidecar() {
-  if (sidecarProcess) {
-    sidecarProcess.kill();
-    sidecarProcess = null;
-    sidecarPort = null;
-    readyPromise = null;
-  }
+  if (!sidecarProcess) return Promise.resolve();
+  const proc = sidecarProcess;
+  const pid = proc.pid;
+  sidecarProcess = null;
+  sidecarPort = null;
+  readyPromise = null;
+
+  return new Promise((resolve) => {
+    let done = false;
+    proc.once('exit', () => {
+      done = true;
+      resolve();
+    });
+    const killGroup = (signal) => {
+      try {
+        // grupo completo (ver detached:true en startSidecar) -- pid negativo
+        // en POSIX es "todo el grupo", no solo el proceso. En Windows no hay
+        // grupos así, matamos el único proceso que Node conoce.
+        process.kill(process.platform === 'win32' ? pid : -pid, signal);
+      } catch (err) {
+        // ESRCH = ya estaba muerto, no es un error real acá.
+        if (err.code !== 'ESRCH') console.error('[sidecar] error matando proceso viejo:', err);
+        if (!done) { done = true; resolve(); }
+      }
+    };
+    killGroup('SIGTERM');
+    setTimeout(() => { if (!done) killGroup('SIGKILL'); }, 3000);
+  });
 }
 
 // Reinicia con nuevas variables de entorno (ej. después de guardar Ajustes con API keys nuevas).
 async function restartSidecar(envOverrides) {
-  stopSidecar();
+  await stopSidecar();
   return startSidecar(envOverrides);
 }
 
