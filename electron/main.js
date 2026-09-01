@@ -6,6 +6,7 @@ const settingsStore = require('./settings-store');
 const sidecar = require('./sidecar-manager');
 const operativaClient = require('./operativa-client');
 const autoUpdaterModule = require('./auto-updater');
+const notifier = require('./notifier');
 
 let mainWindow = null;
 let outboxFlushInterval = null;
@@ -103,6 +104,11 @@ async function _bootAndLoad() {
         console.error(`[main] intento ${intento}/${INTENTOS} de arrancar el sidecar falló:`, err);
       }
     }
+    // v0.2.13 (01/09) -- pedido real de Nicolás: notificación nativa de
+    // macOS cuando llega algo nuevo a WhatsApp/Mail/Tareas, aunque esté en
+    // otra app. sidecar.getPort (no `port` capturado acá) para que siga
+    // funcionando si el sidecar se reinicia después (ej. al guardar Ajustes).
+    if (port) notifier.start(sidecar.getPort);
   } else if (role === 'operativa') {
     _startOutboxFlusher();
   }
@@ -192,6 +198,7 @@ if (!app.requestSingleInstanceLock()) {
 
 app.on('window-all-closed', () => {
   sidecar.stopSidecar();
+  notifier.stop();
   if (outboxFlushInterval) clearInterval(outboxFlushInterval);
   if (updateCheckInterval) clearInterval(updateCheckInterval);
   if (process.platform !== 'darwin') app.quit();
@@ -199,6 +206,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   sidecar.stopSidecar();
+  notifier.stop();
   if (outboxFlushInterval) clearInterval(outboxFlushInterval);
   if (updateCheckInterval) clearInterval(updateCheckInterval);
 });
