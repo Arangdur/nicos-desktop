@@ -6,7 +6,7 @@
 // (ver package.json -> build.extraResources) — no depende de que la máquina destino
 // tenga Python instalado.
 const { app } = require('electron');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
@@ -124,11 +124,40 @@ function startSidecar(envOverrides) {
   return readyPromise;
 }
 
-// Devuelve una promesa que se resuelve cuando el proceso realmente terminó
-// (evento 'exit'), no apenas se le mandó la señal -- SIGTERM no es
-// instantáneo, y arrancar el reemplazo antes de que el viejo soltara el
-// puerto es exactamente lo que dejó vivo al zombie del 27/08 (ver comentario
-// en startSidecar). Escala a SIGKILL si a los 3s segundos no murió solo.
+// v0.2.13 (01/09) -- segundo hallazgo real el mismo día: el intento anterior
+// (matar el GRUPO de procesos con pid negativo) se probó a mano en la
+// Terminal y funcionó perfecto -- pero desde DENTRO de Electron, ese mismo
+// `process.kill(-pid, señal)` puede fallar (permisos del sandbox de la app,
+// no confirmado exactamente por qué) y el código lo trataba como "ya
+// terminó" con tal de no bloquear el restart -- dejando al viejo vivo de
+// nuevo, esta vez con la app HORAS después de reabrirla, no días. Se ve en
+// vivo: el zombie de las 11:56 seguía respondiendo en el puerto real a las
+// 12:29, mientras un "nuevo" proceso de las 12:21 ya existía sin haber
+// podido bindear nada.
+//
+// Fix más robusto: en vez de confiar en un solo mecanismo, matar el
+// bootloader por su PID directo (funciona siempre, ya lo hacía la versión
+// vieja) Y buscar a su hijo real con `pgrep -P` para matarlo también por su
+// propio PID -- sin depender de que la señal al grupo se propague. Un error
+// al matar NUNCA resuelve la promesa como si hubiera funcionado -- solo el
+// evento 'exit' real, o agotar los reintentos, terminan la espera.
+function _hijosDe(pid) {
+  try {
+    return execFileSync('pgrep', ['-P', String(pid)], { encoding: 'utf-8' })
+      .split('\n').map((s) => s.trim()).filter(Boolean).map(Number);
+  } catch (err) {
+    return []; // pgrep sale con código 1 si no hay hijos -- no es un error real
+  }
+}
+
+function _matarPid(pid, signal) {
+  try {
+    process.kill(pid, signal);
+  } catch (err) {
+    if (err.code !== 'ESRCH') console.error(`[sidecar] error mandando ${signal} a ${pid}:`, err.message);
+  }
+}
+
 function stopSidecar() {
   if (!sidecarProcess) return Promise.resolve();
   const proc = sidecarProcess;
@@ -143,20 +172,23 @@ function stopSidecar() {
       done = true;
       resolve();
     });
-    const killGroup = (signal) => {
-      try {
-        // grupo completo (ver detached:true en startSidecar) -- pid negativo
-        // en POSIX es "todo el grupo", no solo el proceso. En Windows no hay
-        // grupos así, matamos el único proceso que Node conoce.
-        process.kill(process.platform === 'win32' ? pid : -pid, signal);
-      } catch (err) {
-        // ESRCH = ya estaba muerto, no es un error real acá.
-        if (err.code !== 'ESRCH') console.error('[sidecar] error matando proceso viejo:', err);
-        if (!done) { done = true; resolve(); }
+
+    const intentar = (signal) => {
+      const hijos = _hijosDe(pid); // hay que buscarlos ANTES de matar al padre
+      _matarPid(pid, signal);
+      for (const hijoPid of hijos) _matarPid(hijoPid, signal);
+      if (process.platform !== 'win32') {
+        try { process.kill(-pid, signal); } catch (err) { /* mejor esfuerzo, ya cubrimos los PIDs directos arriba */ }
       }
     };
-    killGroup('SIGTERM');
-    setTimeout(() => { if (!done) killGroup('SIGKILL'); }, 3000);
+
+    intentar('SIGTERM');
+    setTimeout(() => { if (!done) intentar('SIGKILL'); }, 3000);
+    // último recurso: si ni SIGKILL directo a cada PID lo tumbó en otros 3s,
+    // algo más profundo está pasando (no un simple "la señal no llegó") --
+    // no vale la pena seguir reintentando a ciegas, mejor no bloquear el
+    // arranque del reemplazo para siempre.
+    setTimeout(() => { if (!done) { done = true; resolve(); } }, 6000);
   });
 }
 
