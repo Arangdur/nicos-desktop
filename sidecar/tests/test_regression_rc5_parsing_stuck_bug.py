@@ -55,7 +55,7 @@ class TestRegressionRc5ParsingStuckBug(unittest.TestCase):
         self.tasks.ALLOWED_TRANSITIONS["parsing"] = set(_OLD_PARSING_TRANSITIONS)
 
         fake.install_fake_clients(
-            self.ai_router, openai_behavior=[fake.valid_extraction(domain="unknown")] * 10,
+            self.ai_router, claude_behavior=[fake.valid_extraction(domain="unknown")] * 10,
         )
         result = self.tasks.create_task("regression-1", "marianela", None, "algo ambiguo")
         task = result["task"]
@@ -76,8 +76,8 @@ class TestRegressionRc5ParsingStuckBug(unittest.TestCase):
         18/7/2026 antes de cortarlo a mano."""
         self.tasks.ALLOWED_TRANSITIONS["parsing"] = set(_OLD_PARSING_TRANSITIONS)
 
-        _, openai_client = fake.install_fake_clients(
-            self.ai_router, openai_behavior=[fake.valid_extraction(domain="unknown")] * 10,
+        claude_client, _ = fake.install_fake_clients(
+            self.ai_router, claude_behavior=[fake.valid_extraction(domain="unknown")] * 10,
         )
         result = self.tasks.create_task("regression-2", "marianela", None, "algo ambiguo")
         task = result["task"]
@@ -91,7 +91,7 @@ class TestRegressionRc5ParsingStuckBug(unittest.TestCase):
         # 5 ciclos, 5 llamadas reales -- sin ningún límite, exactamente el
         # comportamiento que MAX_EXTRACTION_ATTEMPTS (con la máquina de
         # estados arreglada) corta en 2.
-        self.assertEqual(openai_client.call_count, 5)
+        self.assertEqual(claude_client.call_count, 5)
         self.assertEqual(self.tasks.get_task_dict(task["task_id"])["state"], "parsing")
 
     def test_con_la_maquina_de_estados_actual_NO_se_reproduce_el_bug(self):
@@ -99,8 +99,8 @@ class TestRegressionRc5ParsingStuckBug(unittest.TestCase):
         real del código en este commit), el mismo escenario exacto sale de
         'parsing' en el primer intento. Si este test empieza a fallar sin que
         el de arriba haya cambiado, el fix se rompió de otra forma."""
-        _, openai_client = fake.install_fake_clients(
-            self.ai_router, openai_behavior=[fake.valid_extraction(domain="unknown")] * 10,
+        claude_client, _ = fake.install_fake_clients(
+            self.ai_router, claude_behavior=[fake.valid_extraction(domain="unknown")] * 10,
         )
         result = self.tasks.create_task("regression-3", "marianela", None, "algo ambiguo")
         task = result["task"]
@@ -109,7 +109,7 @@ class TestRegressionRc5ParsingStuckBug(unittest.TestCase):
 
         final = self.tasks.get_task_dict(task["task_id"])
         self.assertEqual(final["state"], "needs_information")
-        self.assertEqual(openai_client.call_count, 1)
+        self.assertEqual(claude_client.call_count, 1)
 
 
 if __name__ == "__main__":

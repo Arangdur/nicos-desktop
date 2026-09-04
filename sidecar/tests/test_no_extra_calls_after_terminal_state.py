@@ -51,17 +51,17 @@ class TestNoExtraCallsAfterTerminalState(unittest.TestCase):
                     pass  # no se ejecuta nada en este test -- solo importa si se reclamó
 
     def test_needs_information_no_genera_mas_llamadas(self):
-        _, openai_client = fake.install_fake_clients(
-            self.ai_router, openai_behavior=[fake.valid_extraction(domain="unknown")],
+        claude_client, _ = fake.install_fake_clients(
+            self.ai_router, claude_behavior=[fake.valid_extraction(domain="unknown")],
         )
         result = self.tasks.create_task("no-extra-1", "marianela", None, "algo ambiguo")
         self.worker._process_classification(result["task"])
         self.assertEqual(self.tasks.get_task_dict(result["task"]["task_id"])["state"], "needs_information")
-        calls_after_classification = openai_client.call_count
+        calls_after_classification = claude_client.call_count
 
         self._simulate_loop_ticks()
 
-        self.assertEqual(openai_client.call_count, calls_after_classification,
+        self.assertEqual(claude_client.call_count, calls_after_classification,
                           "needs_information no está en QUEUED_STATES -- no debería reclamarse de nuevo")
 
     def test_needs_review_no_genera_mas_llamadas(self):
@@ -96,19 +96,19 @@ class TestNoExtraCallsAfterTerminalState(unittest.TestCase):
         """No es sobre llamadas a IA (la clasificación ya terminó) sino sobre
         que 'ready' no vuelva a pasar por _process_classification -- confirma
         que el ruteo por estado en el loop es correcto."""
-        _, openai_client = fake.install_fake_clients(
+        claude_client, _ = fake.install_fake_clients(
             self.ai_router,
-            openai_behavior=[fake.valid_extraction(domain="cfo", intent="register_expense",
+            claude_behavior=[fake.valid_extraction(domain="cfo", intent="register_expense",
                                                      amount=1000, date="18/07/2026", concept="algo")],
         )
         result = self.tasks.create_task("no-extra-4", "marianela", None, "gasté $1000 en algo")
         self.worker._process_classification(result["task"])
         self.assertEqual(self.tasks.get_task_dict(result["task"]["task_id"])["state"], "ready")
-        calls_after = openai_client.call_count
+        calls_after = claude_client.call_count
 
         self._simulate_loop_ticks()
 
-        self.assertEqual(openai_client.call_count, calls_after, "'ready' no debería volver a pasar por clasificación")
+        self.assertEqual(claude_client.call_count, calls_after, "'ready' no debería volver a pasar por clasificación")
 
 
 if __name__ == "__main__":

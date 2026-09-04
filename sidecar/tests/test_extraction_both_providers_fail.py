@@ -59,10 +59,13 @@ class TestExtractionBothProvidersFail(unittest.TestCase):
         a propósito NO se prueba el alternativo (ver docstring de
         ai_router.extract): un error de auth se quiere visible y accionable,
         no enmascarado por un fallback silencioso."""
+        # v0.2.13 -- extract_task pasó a tener a Claude como primario (ver
+        # provider_matrix.json) -- el que tiene que fallar acá es el
+        # PRIMARIO, no específicamente "openai".
         claude_client, openai_client = fake.install_fake_clients(
             self.ai_router,
-            openai_behavior=[fake.AuthenticationError("invalid api key")],
-            claude_behavior=[fake.valid_extraction()],  # nunca debería tocarse
+            claude_behavior=[fake.AuthenticationError("invalid api key")],
+            openai_behavior=[fake.valid_extraction()],  # nunca debería tocarse
         )
         result = self.tasks.create_task("both-fail-2", "marianela", None, "algo")
         task = result["task"]
@@ -71,8 +74,8 @@ class TestExtractionBothProvidersFail(unittest.TestCase):
         final = self.tasks.get_task_dict(task["task_id"])
         self.assertEqual(final["state"], "failed")
         self.assertIn("Ajustes", final["error_message"])
-        self.assertEqual(openai_client.call_count, 1)
-        self.assertEqual(claude_client.call_count, 0, "el alternativo no debería haberse llamado")
+        self.assertEqual(claude_client.call_count, 1)
+        self.assertEqual(openai_client.call_count, 0, "el alternativo no debería haberse llamado")
 
     def test_ningun_proveedor_configurado_es_auth_error_sin_gastar_llamadas(self):
         fake.install_fake_clients(self.ai_router, openai_behavior=None, claude_behavior=None)

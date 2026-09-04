@@ -39,35 +39,35 @@ class TestNeedsInformationCompletion(unittest.TestCase):
         os.unlink(self.tmp_db.name)
 
     def _create_ambiguous_task(self, key="needs-info-1"):
-        _, openai_client = fake.install_fake_clients(
+        claude_client, _ = fake.install_fake_clients(
             self.ai_router,
-            openai_behavior=[fake.valid_extraction(domain="unknown", intent="register_expense",
+            claude_behavior=[fake.valid_extraction(domain="unknown", intent="register_expense",
                                                      amount=8000, date="18/07/2026", concept="Insumos")],
         )
         result = self.tasks.create_task(key, "marianela", None, "Gasté $8.000 en insumos, no sé de qué área")
         task = result["task"]
         self.worker._process_classification(task)
-        return task["task_id"], openai_client
+        return task["task_id"], claude_client
 
     def test_completar_dominio_reclasifica_sin_llamar_a_ningun_proveedor(self):
-        task_id, openai_client = self._create_ambiguous_task()
+        task_id, claude_client = self._create_ambiguous_task()
         needs_info = self.tasks.get_task_dict(task_id)
         self.assertEqual(needs_info["state"], "needs_information")
-        calls_before = openai_client.call_count
+        calls_before = claude_client.call_count
 
         final = self.worker.provide_missing_info(task_id, "nicolas", {"domain": "abate"})
 
         self.assertEqual(final["state"], "ready")  # register_expense con todos los datos -> simple
         self.assertEqual(final["domain"], "abate")
-        self.assertEqual(openai_client.call_count, calls_before, "provide_missing_info no debería llamar a ningún proveedor")
+        self.assertEqual(claude_client.call_count, calls_before, "provide_missing_info no debería llamar a ningún proveedor")
 
     def test_completar_con_campos_todavia_insuficientes_se_queda_en_needs_information(self):
         """Un dominio VÁLIDO (a diferencia del test de abajo) pero con la
         tarea todavía incompleta (falta amount) -- tiene que quedarse en
         needs_information con un evento nuevo, nunca en silencio."""
-        _, openai_client = fake.install_fake_clients(
+        claude_client, _ = fake.install_fake_clients(
             self.ai_router,
-            openai_behavior=[fake.valid_extraction(domain="unknown", intent="register_expense",
+            claude_behavior=[fake.valid_extraction(domain="unknown", intent="register_expense",
                                                      amount=None, date="18/07/2026", concept="Insumos")],
         )
         result = self.tasks.create_task("needs-info-2", "marianela", None, "Gasté algo en insumos, no sé cuánto ni de qué área")
@@ -126,9 +126,9 @@ class TestNeedsInformationCompletion(unittest.TestCase):
         hash/revisión VIEJOS tiene que fallar con StaleApproval -- es
         exactamente el mecanismo ya existente (approve_task), disparado acá
         por provide_missing_info."""
-        _, openai_client = fake.install_fake_clients(
+        claude_client, _ = fake.install_fake_clients(
             self.ai_router,
-            openai_behavior=[fake.valid_extraction(domain="unknown", intent="new_financial_action",
+            claude_behavior=[fake.valid_extraction(domain="unknown", intent="new_financial_action",
                                                      amount=50000, date="18/07/2026", concept="proveedor nuevo")],
         )
         result = self.tasks.create_task("needs-info-stale-1", "marianela", None,
@@ -197,9 +197,9 @@ class TestNeedsInformationCompletion(unittest.TestCase):
         alcance, tipo trading bot) hace que prepare_action() rechace la
         combinación (UnsupportedDomain) -- sin este resguardo, la tarea
         quedaba parada en 'classified' sin ninguna transición final."""
-        _, openai_client = fake.install_fake_clients(
+        claude_client, _ = fake.install_fake_clients(
             self.ai_router,
-            openai_behavior=[fake.valid_extraction(domain="unknown", intent="other",
+            claude_behavior=[fake.valid_extraction(domain="unknown", intent="other",
                                                      amount=None, date=None, concept=None,
                                                      evidence="mención de trading, fuera de alcance")],
         )

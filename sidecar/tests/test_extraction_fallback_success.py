@@ -37,13 +37,18 @@ class TestExtractionFallbackSuccess(unittest.TestCase):
     def tearDown(self):
         os.unlink(self.tmp_db.name)
 
+    # v0.2.13 -- extract_task pasó a tener a Claude como primario (ver
+    # provider_matrix.json) -- todo este archivo prueba "el primario falla,
+    # el alternativo completa"; ahora el primario que falla es Claude y el
+    # alternativo que completa es OpenAI (roles dados vuelta, mismo caso).
+
     def test_429_en_primario_cae_al_alternativo_y_completa_la_extraccion(self):
         claude_client, openai_client = fake.install_fake_clients(
             self.ai_router,
-            openai_behavior=[fake.RateLimitError(
+            claude_behavior=[fake.RateLimitError(
                 "Error code: 429 - insufficient_quota: You exceeded your current quota"
             )],
-            claude_behavior=[fake.valid_extraction(
+            openai_behavior=[fake.valid_extraction(
                 domain="cfo", intent="register_income", amount=23456,
                 date="18/07/2026", concept="Devolución de una compra",
             )],
@@ -57,8 +62,8 @@ class TestExtractionFallbackSuccess(unittest.TestCase):
         self.assertEqual(final["state"], "ready")
         self.assertEqual(final["domain"], "cfo")
         self.assertEqual(final["extracted_json"]["amount"], 23456)
-        self.assertEqual(openai_client.call_count, 1)
         self.assertEqual(claude_client.call_count, 1)
+        self.assertEqual(openai_client.call_count, 1)
 
     def test_fallback_queda_registrado_en_el_evento_de_clasificado(self):
         """El Director tiene que poder ver, mirando el historial, que la
@@ -66,8 +71,8 @@ class TestExtractionFallbackSuccess(unittest.TestCase):
         'funcionó', tiene que quedar trazado."""
         fake.install_fake_clients(
             self.ai_router,
-            openai_behavior=[fake.RateLimitError("429")],
-            claude_behavior=[fake.valid_extraction()],
+            claude_behavior=[fake.RateLimitError("429")],
+            openai_behavior=[fake.valid_extraction()],
         )
         result = self.tasks.create_task("fallback-2", "marianela", None, "algo")
         task = result["task"]
@@ -79,8 +84,8 @@ class TestExtractionFallbackSuccess(unittest.TestCase):
         if isinstance(detail, str):
             import json
             detail = json.loads(detail)
-        self.assertEqual(detail.get("fell_back_from"), "openai")
-        self.assertEqual(detail.get("extraction_provider"), "claude")
+        self.assertEqual(detail.get("fell_back_from"), "claude")
+        self.assertEqual(detail.get("extraction_provider"), "openai")
 
     def test_fallback_no_aplica_solo_a_tareas_verdes(self):
         """Hallazgo del smoke test: el nombre viejo (fallback_allowed_for_
@@ -95,8 +100,8 @@ class TestExtractionFallbackSuccess(unittest.TestCase):
         centro_mando_adapter.prepare_action)."""
         fake.install_fake_clients(
             self.ai_router,
-            openai_behavior=[fake.RateLimitError("429")],
-            claude_behavior=[fake.valid_extraction(domain="abate", intent="new_financial_action", amount=99999,
+            claude_behavior=[fake.RateLimitError("429")],
+            openai_behavior=[fake.valid_extraction(domain="abate", intent="new_financial_action", amount=99999,
                                                      concept="proveedor nuevo")],
         )
         result = self.tasks.create_task("fallback-3", "marianela", None,
@@ -116,7 +121,7 @@ class TestExtractionFallbackSuccess(unittest.TestCase):
         if isinstance(detail, str):
             import json
             detail = json.loads(detail)
-        self.assertEqual(detail.get("fell_back_from"), "openai")
+        self.assertEqual(detail.get("fell_back_from"), "claude")
 
 
 if __name__ == "__main__":

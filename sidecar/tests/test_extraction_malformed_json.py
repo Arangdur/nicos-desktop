@@ -37,11 +37,12 @@ class TestExtractionMalformedJson(unittest.TestCase):
         os.unlink(self.tmp_db.name)
 
     def test_malformado_en_primario_reintenta_una_vez_con_el_alternativo_y_se_recupera(self):
-        # Primario (openai, default de la matriz): malformado. Alternativo
-        # (claude): válido -- exactamente UN reintento, y termina bien.
+        # v0.2.13 -- Primario (claude, default de la matriz): malformado.
+        # Alternativo (openai): válido -- exactamente UN reintento, y
+        # termina bien.
         claude_client, openai_client = self._install(
-            openai_behavior=["malformed"],
-            claude_behavior=[fake.valid_extraction(domain="cfo", intent="register_expense", amount=5000,
+            claude_behavior=["malformed"],
+            openai_behavior=[fake.valid_extraction(domain="cfo", intent="register_expense", amount=5000,
                                                      date="18/07/2026", concept="algo")],
         )
 
@@ -51,8 +52,8 @@ class TestExtractionMalformedJson(unittest.TestCase):
 
         final = self.tasks.get_task_dict(task["task_id"])
         self.assertEqual(final["state"], "ready")  # register_expense con todos los datos -> simple -> ready
-        self.assertEqual(openai_client.call_count, 1)
         self.assertEqual(claude_client.call_count, 1)
+        self.assertEqual(openai_client.call_count, 1)
 
     def test_malformado_en_ambos_termina_en_needs_review_nunca_en_parsing(self):
         claude_client, openai_client = self._install(
@@ -76,14 +77,14 @@ class TestExtractionMalformedJson(unittest.TestCase):
         no parsea como JSON -- esto prueba explícitamente esa rama de
         `_try_extract` (json.JSONDecodeError), no solo forma inválida."""
         claude_client, openai_client = self._install(
-            openai_behavior=["malformed"],
-            claude_behavior=[fake.valid_extraction()],
+            claude_behavior=["malformed"],
+            openai_behavior=[fake.valid_extraction()],
         )
         outcome = self.ai_router.extract("cualquier cosa")
         self.assertEqual(outcome["outcome"], "success")
-        self.assertEqual(outcome["provider"], "claude")
-        self.assertEqual(outcome["fell_back_from"], "openai")
-        self.assertIn("JSON inválido", outcome["attempts"][0]["error"])
+        self.assertEqual(outcome["provider"], "openai")
+        self.assertEqual(outcome["fell_back_from"], "claude")
+        self.assertIn("la respuesta no incluyó el tool_use esperado", outcome["attempts"][0]["error"])
 
     def _install(self, openai_behavior, claude_behavior):
         claude_client, openai_client = fake.install_fake_clients(

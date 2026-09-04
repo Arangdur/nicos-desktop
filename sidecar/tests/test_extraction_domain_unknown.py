@@ -38,11 +38,12 @@ class TestExtractionDomainUnknown(unittest.TestCase):
         os.unlink(self.tmp_db.name)
 
     def test_domain_unknown_va_a_needs_information_sin_llamado_extra(self):
-        # extract_task -> "openai" por default en provider_matrix.json, así
-        # que el primario real acá es OpenAI -- Claude ni se toca.
-        _, openai_client = fake.install_fake_clients(
+        # v0.2.13 -- extract_task -> "claude" por default en
+        # provider_matrix.json, así que el primario real acá es Claude --
+        # OpenAI ni se toca.
+        claude_client, _ = fake.install_fake_clients(
             self.ai_router,
-            openai_behavior=[fake.valid_extraction(domain="unknown", intent="other", amount=None,
+            claude_behavior=[fake.valid_extraction(domain="unknown", intent="other", amount=None,
                                                      date=None, concept=None, evidence="mención de trading, fuera de alcance")],
         )
         result = self.tasks.create_task("domain-unknown-1", "marianela", None, "Cambié la posición del bot en BTC")
@@ -56,7 +57,7 @@ class TestExtractionDomainUnknown(unittest.TestCase):
         self.assertIn("ambiguo", final["error_message"].lower())
         # NO se le dio la oportunidad al alternativo -- domain=unknown es una
         # extracción EXITOSA y estructuralmente válida, no un fallo de proveedor.
-        self.assertEqual(openai_client.call_count, 1)
+        self.assertEqual(claude_client.call_count, 1)
 
     def test_ui_puede_reconstruir_que_informacion_falta(self):
         """No hace falta abrir Electron para esta parte: alcanza con confirmar
@@ -64,7 +65,7 @@ class TestExtractionDomainUnknown(unittest.TestCase):
         extracted_json -- efectivamente queda poblado y es legible."""
         fake.install_fake_clients(
             self.ai_router,
-            openai_behavior=[fake.valid_extraction(domain="unknown")],
+            claude_behavior=[fake.valid_extraction(domain="unknown")],
         )
         result = self.tasks.create_task("domain-unknown-2", "marianela", None, "algo ambiguo")
         task = result["task"]
