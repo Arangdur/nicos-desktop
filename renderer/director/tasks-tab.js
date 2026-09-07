@@ -188,13 +188,21 @@ async function toggleTaskDetail(taskId) {
         <button class="danger btn-reject" data-id="${taskId}">Rechazar</button>
       </div>
     `;
-  } else if (task.state === 'needs_review' && reconciliacionInfo) {
+  } else if (task.state === 'needs_review') {
+    // v0.2.14 (07/09) -- hallazgo real de Nicolás: una tarea que necesita
+    // revisión manual por CUALQUIER motivo (no solo por una ejecución
+    // interrumpida -- ej. "Intent no soportado para este dominio todavía")
+    // solo ofrecía "Cancelar tarea", sin forma de dejar constancia de que la
+    // hizo a mano ("está realizada") ni de por qué se anula. El botón
+    // "Confirmar NO ejecutada y reintentar" sí sigue siendo solo para el
+    // caso de reconciliación -- reintentar ejecución automática de algo que
+    // ni siquiera se pudo preparar (prepare_action) volvería a fallar igual.
     actionButtons = `
-      <div class="error-box" style="margin-top:var(--space-4);">${escHtmlTasks(reconciliacionInfo.aviso || '')}</div>
-      <div class="row-wrap">
-        <button class="primary btn-resolve" data-id="${taskId}" data-decision="confirm_executed">Confirmar ejecutada</button>
-        <button class="secondary btn-resolve" data-id="${taskId}" data-decision="confirm_not_executed_retry">Confirmar NO ejecutada y reintentar</button>
-        <button class="danger btn-resolve" data-id="${taskId}" data-decision="cancel">Cancelar</button>
+      ${reconciliacionInfo ? `<div class="error-box" style="margin-top:var(--space-4);">${escHtmlTasks(reconciliacionInfo.aviso || '')}</div>` : ''}
+      <div class="row-wrap" style="margin-top:var(--space-4);">
+        <button class="primary btn-resolve" data-id="${taskId}" data-decision="confirm_executed">Marcar como realizada</button>
+        ${reconciliacionInfo ? `<button class="secondary btn-resolve" data-id="${taskId}" data-decision="confirm_not_executed_retry">Confirmar NO ejecutada y reintentar</button>` : ''}
+        <button class="danger btn-resolve" data-id="${taskId}" data-decision="cancel">Anular</button>
         <button class="secondary btn-resolve" data-id="${taskId}" data-decision="keep_in_review">Mantener en revisión</button>
       </div>
     `;
@@ -214,12 +222,6 @@ async function toggleTaskDetail(taskId) {
           <button class="primary btn-provide-info" data-id="${taskId}">Completar y reclasificar</button>
           <button class="danger btn-reject" data-id="${taskId}">Cancelar tarea</button>
         </div>
-      </div>
-    `;
-  } else if (task.state === 'needs_review') {
-    actionButtons = `
-      <div style="margin-top:var(--space-4);">
-        <button class="danger btn-reject" data-id="${taskId}">Cancelar tarea</button>
       </div>
     `;
   }
@@ -298,9 +300,20 @@ async function toggleTaskDetail(taskId) {
   detailEl.querySelectorAll('.btn-resolve').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const decision = btn.dataset.decision;
+      // v0.2.14 (07/09) -- pedido real de Nicolás: poder dejar constancia de
+      // CÓMO se resolvió una tarea de revisión manual, no solo cancelarla en
+      // silencio -- keep_in_review ya pedía nota, ahora también realizada/
+      // anulada (anular sigue andando sin nota si la deja vacía, por si es
+      // obvio y no hace falta escribir nada).
       let reason = null;
-      if (decision === 'keep_in_review') {
-        reason = await showPrompt('Nota (opcional)', 'Por qué queda en revisión.', { placeholder: 'Ej: esperando confirmación del banco...' });
+      const PROMPTS = {
+        confirm_executed: ['Nota (opcional)', 'Cómo se resolvió a mano.'],
+        cancel: ['Motivo de la anulación (opcional)', 'Por qué se anula esta tarea.'],
+        keep_in_review: ['Nota (opcional)', 'Por qué queda en revisión.'],
+      };
+      if (PROMPTS[decision]) {
+        const [title, body] = PROMPTS[decision];
+        reason = await showPrompt(title, body, { placeholder: 'Ej: esperando confirmación del banco...' });
         if (reason === null) return;
       }
       const res = await fetch(`${tasksApiBase}/api/v1/tasks/${btn.dataset.id}/resolve-execution`, {
