@@ -24,9 +24,11 @@ Marianela) en datos estructurados. NUNCA decidís si algo requiere aprobación n
 — eso lo hace código determinístico después de tu extracción.
 
 Regla de dominio (de Centro de Mando/CLAUDE.md, no la reinventes): si es claramente institucional \
-(Fundación Abate, consultorio compartido, personal de Abate) el dominio es "abate"; si es personal \
-de Nicolás, el dominio es "cfo"; si no está claro o es de otro tipo (clínico, trading, etc.), \
-el dominio es "unknown" — NUNCA inventes un dominio si no está claro en el texto.
+(Fundación Abate, personal de Abate) el dominio es "abate"; si es personal de Nicolás (plata propia, \
+no del consultorio), el dominio es "cfo"; si es un pedido operativo del consultorio particular sin \
+plata de por medio (bono pap, certificado, receta, algo de un paciente puntual), el dominio es \
+"consultorio"; si no está claro o es de otro tipo (clínico de verdad, trading, etc.), el dominio es \
+"unknown" — NUNCA inventes un dominio si no está claro en el texto.
 
 Regla de intención: si el texto describe algo que YA PASÓ (un gasto que ya se hizo, una plata que \
 ya entró), la intención es "register_expense" o "register_income". Si el texto pide INICIAR algo \
@@ -40,7 +42,7 @@ EXTRACTION_JSON_SCHEMA = {
     "schema": {
         "type": "object",
         "properties": {
-            "domain": {"type": "string", "enum": ["cfo", "abate", "unknown"]},
+            "domain": {"type": "string", "enum": ["cfo", "abate", "consultorio", "unknown"]},
             "intent": {
                 "type": "string",
                 "enum": ["register_expense", "register_income", "new_financial_action", "other"],

@@ -106,7 +106,7 @@ class UnsupportedDomain(Exception):
 
 
 def classify_request(extracted: dict):
-    """Devuelve el dominio ('cfo'|'abate') si es válido y soportado, o None si
+    """Devuelve el dominio ('cfo'|'abate'|'consultorio') si es válido y soportado, o None si
     hace falta más información (dominio ambiguo/ausente) o está fuera de alcance
     (cualquier cosa que no sea cfo/abate — clínico incluido, por construcción
     nunca llega acá con un dominio soportado)."""
@@ -161,6 +161,21 @@ def prepare_action(domain: str, intent: str, extracted: dict) -> dict:
                 "vía el flujo actual de Centro de Mando en Claude Code."
             ),
         }
+    if domain == "consultorio":
+        # v0.2.15 (08/09) -- pedido operativo del consultorio particular
+        # ("necesito bono pap de tal paciente"), nunca un movimiento de
+        # plata -- no hay ningún script que "ejecutar" acá. El circuito real
+        # es que Nicolás le conteste a Marianela con la nueva función de
+        # respuesta (tasks.add_director_reply), no una automatización.
+        return {
+            "domain": "consultorio",
+            "command": "responder_a_mano",
+            "args": {
+                "pedido": extracted.get("concept"),
+                "detalle": extracted.get("evidence", ""),
+            },
+            "nota": "Pedido operativo del consultorio -- respondele a quien lo cargó desde el detalle de la tarea.",
+        }
     raise UnsupportedDomain(f"Dominio '{domain}' no soportado.")
 
 
@@ -179,7 +194,7 @@ def execute_action(task_id: str, prepared_action: dict) -> dict:
     durable de registrar_movimiento.py en vez de asumir 'uncertain' a ciegas."""
     domain = prepared_action.get("domain")
 
-    if domain == "abate":
+    if domain in ("abate", "consultorio"):
         return {
             "ok": False,
             "needs_manual_review": True,

@@ -22,7 +22,7 @@ const FIELD_LABEL = {
   proveedor: 'Proveedor', nota: 'Nota',
 };
 
-const DOMAIN_LABEL = { cfo: 'CFO (personal de Nicolás)', abate: 'Abate (institucional)' };
+const DOMAIN_LABEL = { cfo: 'CFO (personal de Nicolás)', abate: 'Abate (institucional)', consultorio: 'Consultorio particular' };
 const INTENT_LABEL = { register_expense: 'Registrar gasto', register_income: 'Registrar ingreso' };
 
 let tasksApiBase = null;
@@ -266,7 +266,8 @@ async function toggleTaskDetail(taskId) {
         <select class="info-domain-select" data-id="${taskId}">
           <option value="">-- elegir --</option>
           <option value="cfo">CFO (personal de Nicolás)</option>
-          <option value="abate">Abate (institucional / consultorio)</option>
+          <option value="abate">Abate (institucional)</option>
+          <option value="consultorio">Consultorio particular</option>
         </select>
         <div class="row-wrap" style="margin-top:var(--space-3);">
           <button class="primary btn-provide-info" data-id="${taskId}">Completar y reclasificar</button>

@@ -100,7 +100,7 @@ class TestNeedsInformationCompletion(unittest.TestCase):
         self.assertEqual(after["state"], before["state"], "el estado no debería haber cambiado")
         self.assertEqual(len(self.tasks.get_task_events(task_id)), events_before, "no debería haberse agregado ningún evento")
 
-    def test_solo_cfo_y_abate_son_aceptados(self):
+    def test_cfo_abate_y_consultorio_son_aceptados(self):
         task_id_1, _ = self._create_ambiguous_task(key="needs-info-domain-2")
         result_cfo = self.worker.provide_missing_info(task_id_1, "nicolas", {"domain": "cfo"})
         self.assertNotEqual(result_cfo["state"], "needs_information")  # domain aceptado, avanza
@@ -108,6 +108,14 @@ class TestNeedsInformationCompletion(unittest.TestCase):
         task_id_2, _ = self._create_ambiguous_task(key="needs-info-domain-3")
         result_abate = self.worker.provide_missing_info(task_id_2, "nicolas", {"domain": "abate"})
         self.assertNotEqual(result_abate["state"], "needs_information")  # domain aceptado, avanza
+
+        # v0.2.15 (08/09) -- dominio nuevo: pedidos operativos del
+        # consultorio particular ("necesito bono pap de tal paciente"), sin
+        # plata de por medio -- nunca se automatiza (mismo tratamiento que
+        # abate), pero es un dominio real y soportado.
+        task_id_3, _ = self._create_ambiguous_task(key="needs-info-domain-4")
+        result_consultorio = self.worker.provide_missing_info(task_id_3, "nicolas", {"domain": "consultorio"})
+        self.assertNotEqual(result_consultorio["state"], "needs_information")
 
     def test_provide_missing_info_incrementa_task_revision(self):
         task_id, _ = self._create_ambiguous_task(key="needs-info-revision-1")

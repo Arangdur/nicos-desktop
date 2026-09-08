@@ -8,9 +8,15 @@
 # sidecar/tests/test_risk_policy_characterization.py — compara los 10 casos
 # reales del 17/07/2026 contra el resultado ya conocido y verificado. Si algo
 # cambia acá y ese test no fue actualizado a propósito, algo se rompió.
-version: 1
+version: 2
 
-supported_domains: [cfo, abate]
+# v2 (08/09/2026) -- agregado "consultorio": pedido real de Nicolás. Muchas
+# tareas de Marianela no son un gasto/ingreso de ningún tipo ("necesito bono
+# pap de tal paciente") -- son pedidos operativos del consultorio particular,
+# distintos de sus finanzas personales (cfo) y de la Fundación (abate). Nunca
+# se automatiza (mismo tratamiento que abate hoy) -- ver prepare_action/
+# execute_action en centro_mando_adapter.py.
+supported_domains: [cfo, abate, consultorio]
 
 # Intents que son "transcribir algo que ya pasó" — la única excepción para no
 # pedir OK ("es transcribir lo que Nicolás mismo contó, no una decisión
@@ -21,8 +27,11 @@ logging_intents: [register_expense, register_income]
 required_fields_cfo: [amount, date, concept]
 
 regla_texto: >
-  Si un gasto/ticket es claramente institucional (Fundación, consultorio
-  compartido, personal de Abate) va a "abate"; si es personal/de Nicolás va a
-  "cfo". Cargar un movimiento que Nicolás ya contó es SIMPLE (no requiere OK)
-  porque es transcribir, no decidir. Cualquier acción financiera nueva
-  (pagar, transferir, autorizar) requiere aprobación.
+  Si un gasto/ticket es claramente institucional (Fundación, personal de
+  Abate) va a "abate"; si es personal/de Nicolás va a "cfo"; si es un pedido
+  operativo del consultorio particular (bono pap, certificados, recetas,
+  agenda) sin plata de por medio va a "consultorio". Cargar un movimiento que
+  Nicolás ya contó es SIMPLE (no requiere OK) porque es transcribir, no
+  decidir. Cualquier acción financiera nueva (pagar, transferir, autorizar),
+  y cualquier pedido de "consultorio" (siempre involucra a un paciente),
+  requiere aprobación.
