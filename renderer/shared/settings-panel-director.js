@@ -264,16 +264,35 @@ async function renderSettingsPanelDirector(containerEl, apiBase, onPortChange) {
         <td>${u.display_name}${u.dni ? `<div style="font-size:12px; color:var(--muted);">DNI ${u.dni}</div>` : ''}</td>
         <td>${ROL_LABEL[u.role] || u.role}${u.turno ? ' · turno ' + (TURNO_LABEL[u.turno] || u.turno) : ''}</td>
         <td>${u.created_at ? new Date(u.created_at + 'Z').toLocaleString('es-AR') : '—'}</td>
+        <td>
+          ${u.telefono ? escHtml(u.telefono) : '<span style="color:var(--muted);">sin cargar</span>'}
+          <button class="secondary btn-telefono" data-id="${u.user_id}" data-actual="${escHtml(u.telefono || '')}" style="margin-left:var(--space-2); font-size:12px; padding:2px 8px;">${u.telefono ? 'Editar' : 'Cargar'}</button>
+        </td>
         <td>${u.revoked_at ? '<span class="tag nuevo">Revocado</span>' : '<span class="tag resuelto">Activo</span>'}</td>
         <td>${u.revoked_at ? '' : `<button class="secondary btn-revoke" data-id="${u.user_id}">Revocar</button>`}</td>
       </tr>
     `).join('');
     listEl.innerHTML = `
       <table>
-        <tr><th>Persona</th><th>Rol</th><th>Vinculado</th><th>Estado</th><th></th></tr>
+        <tr><th>Persona</th><th>Rol</th><th>Vinculado</th><th>Teléfono (WhatsApp)</th><th>Estado</th><th></th></tr>
         ${filasPersonas}${filasPendientes}
       </table>
     `;
+    listEl.querySelectorAll('.btn-telefono').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        // v0.2.15 (08/09) -- pedido real de Nicolás: poder responderle a
+        // Marianela por WhatsApp real desde una tarea -- hace falta su
+        // teléfono, que el alta original no pedía.
+        const nuevo = await showPrompt('Teléfono de WhatsApp', 'Con código de país, ej: +5493537599192.', { placeholder: btn.dataset.actual || '+549...' });
+        if (nuevo === null) return;
+        await fetch(`${apiBase}/api/v1/users/${btn.dataset.id}/telefono`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ telefono: nuevo.trim() }),
+        });
+        showToast('Teléfono actualizado.');
+        loadDevices();
+      });
+    });
     listEl.querySelectorAll('.btn-revoke').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const ok = await showConfirm('Revocar acceso', 'Esta persona pierde el acceso a NicOS de inmediato -- va a necesitar un código nuevo para volver a vincularse.', { confirmLabel: 'Revocar', danger: true });

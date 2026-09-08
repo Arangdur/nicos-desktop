@@ -52,6 +52,56 @@ function renderKvGrid(obj) {
   `;
 }
 
+// v0.2.15 (08/09) -- pedido real de Nicolás: muchas tareas de Marianela no
+// son un gasto/ingreso a extraer -- son pedidos operativos ("necesito bono
+// pap de tal paciente") que necesitan una respuesta suya en texto libre, no
+// una clasificación CFO/Abate. Disponible en CUALQUIER estado de la tarea
+// (a diferencia de actionButtons, que sí depende del estado) -- a Marianela
+// le puede hacer falta una aclaración incluso sobre algo ya 'ready'.
+function renderRespuestaBlock(task) {
+  return `
+    <div class="card" style="margin-top:var(--space-4);">
+      <h4 style="margin:0 0 var(--space-2) 0;">Respuesta para ${escHtmlTasks(task.submitted_by)}</h4>
+      ${task.director_reply ? `
+        <div class="success-box">${escHtmlTasks(task.director_reply)}</div>
+        <p class="help-text">Enviada ${task.director_reply_at ? new Date(task.director_reply_at + 'Z').toLocaleString('es-AR') : ''}</p>
+      ` : ''}
+      <textarea class="respuesta-texto" rows="2" placeholder="Ej: sí, dale el bono pap." style="width:100%;"></textarea>
+      <div class="row-wrap" style="margin-top:var(--space-2);">
+        <button class="primary btn-responder">${task.director_reply ? 'Actualizar respuesta' : 'Responder'}</button>
+      </div>
+    </div>
+  `;
+}
+
+function wireRespuestaBlock(detailEl, taskId) {
+  const btn = detailEl.querySelector('.btn-responder');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const textarea = detailEl.querySelector('.respuesta-texto');
+    const texto = textarea.value.trim();
+    if (!texto) { showToast('Escribí algo antes de responder.', 'error'); return; }
+    const res = await fetch(`${tasksApiBase}/api/v1/tasks/${taskId}/responder`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ texto }),
+    });
+    const result = await res.json();
+    if (!result.ok) {
+      showToast(result.error, 'error');
+      return;
+    }
+    if (result.telefono_configurado && result.whatsapp_enviado) {
+      showToast('Respuesta guardada y enviada por WhatsApp.', 'success');
+    } else if (result.telefono_configurado && !result.whatsapp_enviado) {
+      showToast(`Respuesta guardada, pero el WhatsApp falló: ${result.whatsapp_error}`, 'error');
+    } else {
+      showToast('Respuesta guardada (esta persona no tiene teléfono cargado en Ajustes, no se mandó WhatsApp).', 'default');
+    }
+    toggleTaskDetail(taskId);
+    toggleTaskDetail(taskId);
+  });
+}
+
 // Convierte el historial de eventos (antes "from → to (actor, hora)" en texto
 // plano) en un timeline visual, con las etiquetas de estado ya traducidas.
 function renderTimeline(events) {
@@ -238,11 +288,14 @@ async function toggleTaskDetail(taskId) {
     ${task.error_message ? `<div class="error-box" style="margin-top:var(--space-3);">${escHtmlTasks(task.error_message)}</div>` : ''}
     ${task.result_json ? `<div class="success-box" style="margin-top:var(--space-3);">${escHtmlTasks(task.result_json.stdout || 'Ejecutado correctamente.')}</div>` : ''}
     ${actionButtons}
+    ${renderRespuestaBlock(task)}
     <div style="margin-top:var(--space-5);">
       <h3 style="margin-bottom:var(--space-3);">Historial</h3>
       ${renderTimeline(data.events)}
     </div>
   `;
+
+  wireRespuestaBlock(detailEl, taskId);
 
   detailEl.querySelectorAll('.btn-approve').forEach((btn) => {
     btn.addEventListener('click', async () => {

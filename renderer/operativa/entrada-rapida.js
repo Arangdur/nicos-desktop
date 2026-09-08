@@ -91,9 +91,16 @@ async function loadMisTareas() {
     failed: 'nuevo', cancelled: 'nuevo',
   };
   el.innerHTML = result.tasks.slice(0, 10).map((t) => `
-    <div class="row" style="padding:var(--space-2) 0; border-bottom:1px solid var(--border-soft); font-size:var(--text-sm);">
-      <span class="tag ${ESTADO_TAG_CLASS[t.state] || 'proceso'}">${ESTADO_LABEL[t.state] || t.state}</span>
-      <span>${escHtml(t.raw_text)}</span>
+    <div style="padding:var(--space-2) 0; border-bottom:1px solid var(--border-soft); font-size:var(--text-sm);">
+      <div class="row">
+        <span class="tag ${ESTADO_TAG_CLASS[t.state] || 'proceso'}">${ESTADO_LABEL[t.state] || t.state}</span>
+        <span>${escHtml(t.raw_text)}</span>
+      </div>
+      ${t.director_reply ? `
+        <div class="success-box" style="margin-top:var(--space-2);">
+          <b>Nicolás respondió:</b> ${escHtml(t.director_reply)}
+        </div>
+      ` : ''}
     </div>
   `).join('');
 }

@@ -537,6 +537,20 @@ class Handler(BaseHTTPRequestHandler):
                 pairing.revoke_user(user_id)
                 self._send_json(200, {"ok": True})
 
+            elif path.startswith("/api/v1/users/") and path.endswith("/telefono"):
+                # v0.2.15 (08/09) -- el Director carga el teléfono de una
+                # persona ya vinculada (ver pairing.set_telefono) para poder
+                # responderle por WhatsApp real desde una tarea.
+                if self._is_lan():
+                    self._send_json(403, {"ok": False, "error": "solo disponible localmente"})
+                    return
+                user_id = path.split("/")[4]
+                try:
+                    pairing.set_telefono(user_id, body.get("telefono", ""))
+                    self._send_json(200, {"ok": True})
+                except pairing.PairingError as e:
+                    self._send_json(404, {"ok": False, "error": str(e)})
+
             elif path == "/api/v1/tasks":
                 auth = self._authenticate()
                 if auth is None:
@@ -576,6 +590,9 @@ class Handler(BaseHTTPRequestHandler):
 
             elif path.startswith("/api/v1/tasks/") and path.endswith("/resolve-execution"):
                 self._handle_resolve_execution(path, body)
+
+            elif path.startswith("/api/v1/tasks/") and path.endswith("/responder"):
+                self._handle_task_reply(path, body)
 
             elif path.startswith("/api/v1/tasks/") and path.endswith("/provide-info"):
                 self._handle_provide_info(path, body)
@@ -812,6 +829,47 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"ok": False, "error": str(e)})
         except ValueError as e:
             self._send_json(404, {"ok": False, "error": str(e)})
+
+    def _handle_task_reply(self, path, body):
+        """v0.2.15 (08/09) -- pedido real de Nicolás: responderle en texto
+        libre a quien cargó la tarea (típicamente Marianela, "necesito bono
+        pap de tal paciente") -- no es aprobar/rechazar, es contestar. Nunca
+        por red (Director-only, igual que el resto de las acciones sobre
+        tareas) -- Marianela ve la respuesta del lado de ELLA por polling
+        normal de /api/v1/tasks, esto es solo para que el Director la escriba.
+
+        Guarda la respuesta SIEMPRE primero -- si Twilio falla (sandbox sin
+        el número unido, cuenta sin upgradear, lo que sea) la respuesta no se
+        pierde, solo no salió por WhatsApp. Se informa el resultado del envío
+        aparte (`whatsapp_enviado`), nunca se mezcla con el error de guardado."""
+        if self._is_lan():
+            self._send_json(403, {"ok": False, "error": "responder tareas se hace desde la Mac"})
+            return
+        auth = self._authenticate()
+        task_id = path.split("/")[4]
+        texto = body.get("texto", "")
+        try:
+            result = tasks.add_director_reply(task_id, auth["user_id"], texto)
+        except ValueError as e:
+            self._send_json(404, {"ok": False, "error": str(e)})
+            return
+
+        whatsapp_enviado = False
+        whatsapp_error = None
+        submitted_by = result.get("submitted_by")
+        persona = next((u for u in pairing.list_users() if u["user_id"] == submitted_by), None)
+        telefono = persona.get("telefono") if persona else None
+        if telefono:
+            try:
+                twilio_client.enviar_whatsapp(telefono, texto)
+                whatsapp_enviado = True
+            except (twilio_client.TwilioConfigError, twilio_client.TwilioSendError) as e:
+                whatsapp_error = str(e)
+        self._send_json(200, {
+            "ok": True, "task": result,
+            "whatsapp_enviado": whatsapp_enviado, "whatsapp_error": whatsapp_error,
+            "telefono_configurado": bool(telefono),
+        })
 
     def _handle_provide_info(self, path, body):
         """v0.2.1-rc6 -- el Director completa a mano lo que falta en una tarea

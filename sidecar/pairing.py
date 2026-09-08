@@ -291,13 +291,29 @@ def list_users():
     conn = db.get_connection()
     rows = conn.execute(
         "SELECT users.user_id, users.display_name, users.role, users.dni, users.fecha_nacimiento, "
-        "users.sexo, users.turno, users.created_at, users.revoked_at, "
+        "users.sexo, users.turno, users.telefono, users.created_at, users.revoked_at, "
         "devices.device_id, devices.device_name, devices.paired_at, devices.revoked_at as device_revoked_at "
         "FROM users LEFT JOIN devices ON devices.user_id = users.user_id "
         "WHERE users.role != 'director' "
         "ORDER BY users.created_at DESC"
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def set_telefono(user_id: str, telefono: str):
+    """v0.2.15 (08/09) -- el Director carga el teléfono a mano desde Ajustes
+    (nadie pasa por el alta de nuevo solo por esto). `telefono` vacío borra el
+    dato (ej. si se cargó mal) -- nunca valida formato acá, el que manda un
+    WhatsApp real (twilio_client) es el que se entera si el número no sirve."""
+    conn = db.get_connection()
+    row = conn.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    if row is None:
+        raise PairingError(f"Usuario {user_id} no existe.")
+    conn.execute(
+        "UPDATE users SET telefono = ? WHERE user_id = ?",
+        (telefono.strip() or None, user_id),
+    )
+    conn.commit()
 
 
 def list_pending_codes():

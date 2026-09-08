@@ -357,3 +357,34 @@ def log_execution_resolution_note(task_id: str, actor: str, note: str):
          json.dumps({"decision": "keep_in_review", "note": note}, ensure_ascii=False), now),
     )
     conn.commit()
+
+
+def add_director_reply(task_id: str, actor: str, texto: str) -> dict:
+    """v0.2.15 (08/09) -- pedido real de Nicolás: muchas tareas de Marianela
+    no son un gasto/ingreso a extraer, son pedidos operativos ("necesito bono
+    pap de tal paciente") que necesitan una respuesta en texto libre. Nunca
+    cambia el estado de la tarea -- es un canal aparte del flujo de
+    aprobación, disponible en CUALQUIER estado (incluso 'ready'/'completed';
+    a Marianela le puede hacer falta una aclaración igual). El envío real por
+    WhatsApp (si la persona tiene teléfono cargado) lo hace quien llama a
+    esta función, no acá -- separar guardar-la-respuesta de mandarla evita
+    perder la respuesta si Twilio falla."""
+    row = get_task(task_id)
+    if row is None:
+        raise ValueError(f"Tarea {task_id} no existe.")
+    if not texto or not texto.strip():
+        raise ValueError("La respuesta no puede estar vacía.")
+    now = _now_iso()
+    conn = db.get_connection()
+    conn.execute(
+        "UPDATE tasks SET director_reply = ?, director_reply_at = ?, updated_at = ? WHERE task_id = ?",
+        (texto.strip(), now, now, task_id),
+    )
+    conn.execute(
+        "INSERT INTO task_events (task_id, from_state, to_state, actor, detail_json, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (task_id, row["state"], row["state"], actor,
+         json.dumps({"decision": "director_reply", "texto": texto.strip()}, ensure_ascii=False), now),
+    )
+    conn.commit()
+    return get_task_dict(task_id)
